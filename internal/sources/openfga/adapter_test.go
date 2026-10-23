@@ -11,6 +11,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -58,7 +59,7 @@ func TestPublishNew(t *testing.T) {
 		},
 	}
 
-	st := orgState{Since: time.Now()}
+	st := orgState{StoreID: "store-1", Since: time.Now()}
 	if moved, err := a.publishNew(context.Background(), "acme", &st); err == nil || moved || st.Token != "" {
 		t.Fatalf("a failed page must not move the token: moved=%v err=%v state=%+v", moved, err, st)
 	}
@@ -80,5 +81,44 @@ func TestPublishNew(t *testing.T) {
 	// new@example.com has no Keycloak user yet, so the event carries the email.
 	if published[1].Type() != contract.TypeMembershipRevoked || revoked.User != (contract.User{Email: "new@example.com"}) || revoked.Role != "owner" {
 		t.Errorf("revoked: %s %+v", published[1].Type(), revoked)
+	}
+}
+
+// An org that was deleted and created again has a new store. The old token
+// must not be used with it.
+func TestPublishNewWithRecreatedStore(t *testing.T) {
+	var requests []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.URL.Path+"?"+r.URL.RawQuery)
+		switch r.URL.Path {
+		case "/stores":
+			_, _ = w.Write([]byte(`{"stores": [{"id": "new-store", "name": "acme"}]}`))
+		case "/stores/old-store/changes":
+			http.Error(w, `{"code": "store_id_not_found"}`, http.StatusNotFound)
+		default:
+			_, _ = w.Write([]byte(`{"changes": []}`))
+		}
+	}))
+	defer srv.Close()
+
+	a := &Adapter{
+		FGA:      &Client{BaseURL: srv.URL, HTTP: srv.Client()},
+		Log:      logr.Discard(),
+		storeIDs: map[string]string{"acme": "old-store"},
+	}
+	st := orgState{StoreID: "old-store", Token: "old-token", Since: time.Now().Add(-time.Hour)}
+
+	if _, err := a.publishNew(context.Background(), "acme", &st); err == nil {
+		t.Fatal("expected an error for the deleted store")
+	}
+	if moved, err := a.publishNew(context.Background(), "acme", &st); err != nil || !moved {
+		t.Fatalf("moved=%v err=%v", moved, err)
+	}
+	if st.StoreID != "new-store" || st.Token != "" || time.Since(st.Since) > time.Minute {
+		t.Errorf("state should start fresh on the new store: %+v", st)
+	}
+	last := requests[len(requests)-1]
+	if !strings.HasPrefix(last, "/stores/new-store/changes?") || strings.Contains(last, "old-token") {
+		t.Errorf("last request %s", last)
 	}
 }

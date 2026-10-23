@@ -51,6 +51,9 @@ type Adapter struct {
 
 // orgState is stored as JSON in the state ConfigMap, one key per org.
 type orgState struct {
+	// StoreID is the org's OpenFGA store. A recreated org gets a new store, and
+	// tokens of the old one don't work there.
+	StoreID string `json:"storeID,omitempty"`
 	// Token is the OpenFGA continuation token after the last published change.
 	Token string `json:"token,omitempty"`
 	// Since is when the org subscribed. Changes before it are not published.
@@ -114,9 +117,17 @@ func (a *Adapter) publishNew(ctx context.Context, org string, st *orgState) (boo
 		return false, err
 	}
 	moved := false
+	if st.StoreID != storeID {
+		// A new store, for example because the org was deleted and created
+		// again. Start at the current time, like for a newly subscribed org.
+		*st = orgState{StoreID: storeID, Since: time.Now()}
+		moved = true
+	}
 	for {
 		changes, next, err := a.FGA.Changes(ctx, storeID, "role", st.Token, st.Since, pageSize)
 		if err != nil {
+			// The store may be gone; look it up again next time.
+			delete(a.storeIDs, org)
 			return moved, err
 		}
 		for _, c := range changes {
