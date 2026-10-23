@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/platform-mesh/contrib-eventing/api/v1alpha1"
-	"github.com/platform-mesh/contrib-eventing/internal/delivery/knative"
+	"github.com/platform-mesh/contrib-eventing/internal/delivery"
 	"github.com/platform-mesh/contrib-eventing/internal/orgs"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -33,16 +33,9 @@ import (
 
 const finalizer = "eventing.platform-mesh.io/delivery"
 
-// Delivery is what the controller needs from a delivery backend. Knative is the
-// only one for now.
-type Delivery interface {
-	Ensure(ctx context.Context, org, trigger string, sub *v1alpha1.Subscription) (knative.Status, error)
-	Delete(ctx context.Context, org, trigger string) error
-}
-
 type Reconciler struct {
 	Manager  mcmanager.Manager
-	Delivery Delivery
+	Delivery delivery.Backend
 }
 
 func (r *Reconciler) SetupWithManager(mgr mcmanager.Manager) error {
@@ -85,7 +78,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req mcreconcile.Request) (ct
 	lc := &kcpcorev1alpha1.LogicalCluster{}
 	if err := c.Get(ctx, ctrlruntimeclient.ObjectKey{Name: "cluster"}, lc); err != nil {
 		if apierrors.IsForbidden(err) || apierrors.IsNotFound(err) {
-			return r.setStatus(ctx, c, sub, "", knative.Status{
+			return r.setStatus(ctx, c, sub, "", delivery.Status{
 				Reason:  "ClaimNotAccepted",
 				Message: "accept the logicalclusters permission claim on the APIBinding",
 			}, 0)
@@ -95,7 +88,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req mcreconcile.Request) (ct
 	path := lc.Annotations["kcp.io/path"]
 	org, ok := orgs.FromPath(path)
 	if !ok {
-		return r.setStatus(ctx, c, sub, "", knative.Status{
+		return r.setStatus(ctx, c, sub, "", delivery.Status{
 			Reason:  "NotAnOrgWorkspace",
 			Message: fmt.Sprintf("Subscriptions only work in root:orgs:<org> workspaces, not in %s", path),
 		}, 0)
@@ -113,7 +106,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req mcreconcile.Request) (ct
 	return r.setStatus(ctx, c, sub, org, status, requeue)
 }
 
-func (r *Reconciler) setStatus(ctx context.Context, c ctrlruntimeclient.Client, sub *v1alpha1.Subscription, org string, s knative.Status, requeue time.Duration) (ctrl.Result, error) {
+func (r *Reconciler) setStatus(ctx context.Context, c ctrlruntimeclient.Client, sub *v1alpha1.Subscription, org string, s delivery.Status, requeue time.Duration) (ctrl.Result, error) {
 	cond := metav1.Condition{
 		Type:               "Ready",
 		Status:             metav1.ConditionFalse,

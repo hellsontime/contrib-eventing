@@ -13,6 +13,7 @@ import (
 	"fmt"
 
 	"github.com/platform-mesh/contrib-eventing/api/v1alpha1"
+	"github.com/platform-mesh/contrib-eventing/internal/delivery"
 	"github.com/platform-mesh/contrib-eventing/internal/orgs"
 
 	corev1 "k8s.io/api/core/v1"
@@ -30,23 +31,17 @@ var (
 	triggerGVK = schema.GroupVersionKind{Group: "eventing.knative.dev", Version: "v1", Kind: "Trigger"}
 )
 
-// Status is the delivery state of one Subscription.
-type Status struct {
-	Ready   bool
-	Reason  string
-	Message string
-}
-
+// Backend implements delivery.Backend.
 type Backend struct {
 	Client ctrlruntimeclient.Client
 }
 
 // Ensure makes sure the organization has a Broker and the Subscription has a
 // Trigger, and reports whether the Trigger is ready.
-func (b *Backend) Ensure(ctx context.Context, org, trigger string, sub *v1alpha1.Subscription) (Status, error) {
+func (b *Backend) Ensure(ctx context.Context, org, trigger string, sub *v1alpha1.Subscription) (delivery.Status, error) {
 	ns := orgs.Namespace(org)
 	if err := b.ensureBroker(ctx, org, ns); err != nil {
-		return Status{}, err
+		return delivery.Status{}, err
 	}
 
 	t := &unstructured.Unstructured{}
@@ -58,7 +53,7 @@ func (b *Backend) Ensure(ctx context.Context, org, trigger string, sub *v1alpha1
 		return unstructured.SetNestedMap(t.Object, triggerSpec(sub), "spec")
 	})
 	if err != nil {
-		return Status{}, fmt.Errorf("trigger %s/%s: %w", ns, trigger, err)
+		return delivery.Status{}, fmt.Errorf("trigger %s/%s: %w", ns, trigger, err)
 	}
 	return readiness(t), nil
 }
@@ -125,7 +120,7 @@ func triggerSpec(sub *v1alpha1.Subscription) map[string]any {
 
 // readiness reads the Trigger's Ready condition. Knative folds the Broker's
 // state into it, so this is the only thing we need to look at.
-func readiness(t *unstructured.Unstructured) Status {
+func readiness(t *unstructured.Unstructured) delivery.Status {
 	conditions, _, _ := unstructured.NestedSlice(t.Object, "status", "conditions")
 	for _, c := range conditions {
 		m, ok := c.(map[string]any)
@@ -135,12 +130,12 @@ func readiness(t *unstructured.Unstructured) Status {
 		reason, _ := m["reason"].(string)
 		message, _ := m["message"].(string)
 		if m["status"] == "True" {
-			return Status{Ready: true, Reason: "Ready", Message: "events are delivered to the sink"}
+			return delivery.Status{Ready: true, Reason: "Ready", Message: "events are delivered to the sink"}
 		}
 		if reason == "" {
 			reason = "TriggerNotReady"
 		}
-		return Status{Reason: reason, Message: message}
+		return delivery.Status{Reason: reason, Message: message}
 	}
-	return Status{Reason: "TriggerNotReady", Message: "waiting for Knative to set up delivery"}
+	return delivery.Status{Reason: "TriggerNotReady", Message: "waiting for Knative to set up delivery"}
 }
