@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/kcp-dev/multicluster-provider/apiexport"
+	kcpapisv1alpha1 "github.com/kcp-dev/sdk/apis/apis/v1alpha1"
 	kcpcorev1alpha1 "github.com/kcp-dev/sdk/apis/core/v1alpha1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -52,6 +53,8 @@ func runController(args []string) error {
 	scheme := runtime.NewScheme()
 	for _, add := range []func(*runtime.Scheme) error{
 		clientgoscheme.AddToScheme, v1alpha1.AddToScheme, kcpcorev1alpha1.AddToScheme,
+		// The apiexport provider reads the APIExportEndpointSlice with this scheme.
+		kcpapisv1alpha1.AddToScheme,
 	} {
 		if err := add(scheme); err != nil {
 			return err
