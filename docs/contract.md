@@ -63,6 +63,7 @@ At least one of `user.id` and `user.email` is always present.
 - **No ordering.** A role change arrives as a revoke of the old role and a grant of the new one, in either order.
 - **Account deletion** shows up as one revoke per member. There is no separate event for it yet.
 - **Org deletion** produces no membership events.
+- **Nothing from before the org subscribed.** Events start with the org's first Subscription; older changes are not replayed.
 - **Account creation** shows up as an owner grant for the creator.
 
 ## Open questions
