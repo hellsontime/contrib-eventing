@@ -1,0 +1,19 @@
+# Applied into root:providers:eventing.
+# The logicalclusters claim lets the controller read the workspace path of a
+# Subscription, which is how it finds the organization.
+apiVersion: apis.kcp.io/v1alpha2
+kind: APIExport
+metadata:
+  name: eventing.platform-mesh.io
+spec:
+  resources:
+    - group: eventing.platform-mesh.io
+      name: subscriptions
+      schema: v261023-be9929d.subscriptions.eventing.platform-mesh.io
+      storage:
+        crd: {}
+  permissionClaims:
+    - group: core.kcp.io
+      resource: logicalclusters
+      identityHash: ""
+      verbs: ["get", "list", "watch"]
