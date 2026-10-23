@@ -30,6 +30,24 @@ More detail: [architecture](docs/architecture.md), [event contract](docs/contrac
 - Membership events (a user gets or loses a role on an account), read from OpenFGA.
 - Subscriptions per org.
 
+What comes after is in the [roadmap](docs/roadmap.md).
+
+## Try it locally
+
+You need a local Platform Mesh on kind, installed as described in
+[helm-charts/installation](https://github.com/platform-mesh/helm-charts/tree/main/installation),
+and `kubectl`, `docker`, `curl` and `jq`.
+
+```sh
+./hack/install.sh     # adds eventing and a demo org eventing-demo with a subscribed sink
+./hack/add-member.sh  # gives a user the member role on the demo org
+kubectl -n eventing-demo-sink logs deploy/event-display
+```
+
+The sink shows a `membership.granted` event. `./hack/add-member.sh --remove`
+takes the role away again, `./test/e2e.sh` checks the whole path and
+`./hack/uninstall.sh` removes everything.
+
 ## Background
 
 - Epic: [platform-mesh/backlog#323](https://github.com/platform-mesh/backlog/issues/323)
