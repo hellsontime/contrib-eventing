@@ -27,8 +27,9 @@ func main() {
 
 	var err error
 	switch component, args := os.Args[1], os.Args[2:]; component {
+	case "subscription-controller":
+		err = runController(args)
 	default:
-		_ = args
 		fmt.Fprintf(os.Stderr, "unknown component %q\n\n%s", component, usage)
 		os.Exit(2)
 	}
