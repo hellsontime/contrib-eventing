@@ -21,6 +21,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlruntimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -50,17 +51,29 @@ func (r *Reconciler) Reconcile(ctx context.Context, req mcreconcile.Request) (ct
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	c := cl.GetClient()
+	return r.reconcile(ctx, cl.GetClient(), string(req.ClusterName), req.NamespacedName)
+}
 
+// reconcile works on one workspace, through a client for that workspace.
+func (r *Reconciler) reconcile(ctx context.Context, c ctrlruntimeclient.Client, cluster string, key types.NamespacedName) (ctrl.Result, error) {
 	sub := &v1alpha1.Subscription{}
-	if err := c.Get(ctx, req.NamespacedName, sub); err != nil {
+	if err := c.Get(ctx, key, sub); err != nil {
 		return ctrl.Result{}, ctrlruntimeclient.IgnoreNotFound(err)
 	}
-	trigger := triggerName(string(req.ClusterName), sub.Name)
+	name := deliveryName(cluster, sub.Name)
+	org, problem, err := workspaceOrg(ctx, c)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
 
 	if !sub.DeletionTimestamp.IsZero() {
-		if sub.Status.Org != "" {
-			if err := r.Delivery.Delete(ctx, sub.Status.Org, trigger); err != nil {
+		// The status may not have been written yet when delivery was already set
+		// up, so the workspace path decides, and the status is only a fallback.
+		if org == "" {
+			org = sub.Status.Org
+		}
+		if org != "" {
+			if err := r.Delivery.Delete(ctx, org, name); err != nil {
 				return ctrl.Result{}, err
 			}
 		}
@@ -72,41 +85,49 @@ func (r *Reconciler) Reconcile(ctx context.Context, req mcreconcile.Request) (ct
 			return ctrl.Result{}, err
 		}
 	}
-
-	// The workspace path is only on the LogicalCluster object, which we can read
-	// because of the logicalclusters permission claim on the APIExport.
-	lc := &kcpcorev1alpha1.LogicalCluster{}
-	if err := c.Get(ctx, ctrlruntimeclient.ObjectKey{Name: "cluster"}, lc); err != nil {
-		if apierrors.IsForbidden(err) || apierrors.IsNotFound(err) {
-			return r.setStatus(ctx, c, sub, "", delivery.Status{
-				Reason:  "ClaimNotAccepted",
-				Message: "accept the logicalclusters permission claim on the APIBinding",
-			}, 0)
-		}
-		return ctrl.Result{}, err
-	}
-	path := lc.Annotations["kcp.io/path"]
-	org, ok := orgs.FromPath(path)
-	if !ok {
-		return r.setStatus(ctx, c, sub, "", delivery.Status{
-			Reason:  "NotAnOrgWorkspace",
-			Message: fmt.Sprintf("Subscriptions only work in root:orgs:<org> workspaces, not in %s", path),
-		}, 0)
+	if problem != nil {
+		return setStatus(ctx, c, sub, "", *problem, 0)
 	}
 
-	status, err := r.Delivery.Ensure(ctx, org, trigger, sub)
+	status, err := r.Delivery.Ensure(ctx, org, name, sub)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	// We don't watch Triggers, so check again until delivery is ready.
+	// We don't watch the backend, so check again until delivery is ready.
 	requeue := time.Duration(0)
 	if !status.Ready {
 		requeue = 5 * time.Second
 	}
-	return r.setStatus(ctx, c, sub, org, status, requeue)
+	return setStatus(ctx, c, sub, org, status, requeue)
 }
 
-func (r *Reconciler) setStatus(ctx context.Context, c ctrlruntimeclient.Client, sub *v1alpha1.Subscription, org string, s delivery.Status, requeue time.Duration) (ctrl.Result, error) {
+// workspaceOrg returns the org of the workspace. The path is only on the
+// LogicalCluster object, which we can read because of the logicalclusters
+// permission claim on the APIExport. If the workspace is not an org, it
+// returns the status the Subscription should show instead.
+func workspaceOrg(ctx context.Context, c ctrlruntimeclient.Client) (string, *delivery.Status, error) {
+	lc := &kcpcorev1alpha1.LogicalCluster{}
+	if err := c.Get(ctx, ctrlruntimeclient.ObjectKey{Name: "cluster"}, lc); err != nil {
+		if apierrors.IsForbidden(err) || apierrors.IsNotFound(err) {
+			return "", &delivery.Status{
+				Reason:  "ClaimNotAccepted",
+				Message: "accept the logicalclusters permission claim on the APIBinding",
+			}, nil
+		}
+		return "", nil, err
+	}
+	path := lc.Annotations["kcp.io/path"]
+	org, ok := orgs.FromPath(path)
+	if !ok {
+		return "", &delivery.Status{
+			Reason:  "NotAnOrgWorkspace",
+			Message: fmt.Sprintf("Subscriptions only work in root:orgs:<org> workspaces, not in %s", path),
+		}, nil
+	}
+	return org, nil, nil
+}
+
+func setStatus(ctx context.Context, c ctrlruntimeclient.Client, sub *v1alpha1.Subscription, org string, s delivery.Status, requeue time.Duration) (ctrl.Result, error) {
 	cond := metav1.Condition{
 		Type:               "Ready",
 		Status:             metav1.ConditionFalse,
@@ -126,8 +147,8 @@ func (r *Reconciler) setStatus(ctx context.Context, c ctrlruntimeclient.Client, 
 	return ctrl.Result{RequeueAfter: requeue}, nil
 }
 
-// triggerName is stable for a Subscription and unique across workspaces.
-func triggerName(cluster, name string) string {
+// deliveryName is stable for a Subscription and unique across workspaces.
+func deliveryName(cluster, name string) string {
 	sum := sha256.Sum256([]byte(cluster + "/" + name))
 	return "sub-" + hex.EncodeToString(sum[:])[:16]
 }
