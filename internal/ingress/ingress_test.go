@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
+	"github.com/stretchr/testify/assert"
 
 	"go.platform-mesh.io/golang-commons/logger/testlogger"
 
@@ -70,11 +71,7 @@ func TestHandler(t *testing.T) {
 		}
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)
-		if rec.Code != tc.want {
-			t.Errorf("%s: got %d, want %d (%s)", tc.name, rec.Code, tc.want, rec.Body)
-		}
+		assert.Equal(t, tc.want, rec.Code, "%s: %s", tc.name, rec.Body)
 	}
-	if len(forwarded) != 1 || forwarded[0] != "acme" {
-		t.Errorf("forwarded = %v, want only acme", forwarded)
-	}
+	assert.Equal(t, []string{"acme"}, forwarded)
 }

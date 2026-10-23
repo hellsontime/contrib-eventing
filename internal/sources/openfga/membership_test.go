@@ -5,7 +5,11 @@ SPDX-License-Identifier: Apache-2.0
 
 package openfga
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+)
 
 func TestParseMembership(t *testing.T) {
 	change := func(user, relation, object string) Change {
@@ -13,12 +17,10 @@ func TestParseMembership(t *testing.T) {
 		c.TupleKey.User, c.TupleKey.Relation, c.TupleKey.Object = user, relation, object
 		return c
 	}
-	role := "role:core_platform-mesh_io_account/32epcrhea5sv5v5b/team-a/member"
 
-	got, ok := parseMembership(change("user:alice@example.com", "assignee", role))
-	if !ok || got != (membership{account: "team-a", role: "member", email: "alice@example.com"}) {
-		t.Errorf("got %+v, %v", got, ok)
-	}
+	got, ok := parseMembership(change("user:alice@example.com", "assignee", "role:core_platform-mesh_io_account/32epcrhea5sv5v5b/team-a/member"))
+	assert.True(t, ok)
+	assert.Equal(t, membership{account: "team-a", role: "member", email: "alice@example.com"}, got)
 
 	for _, c := range []Change{
 		// The second tuple iam-service writes: the role on the account.
@@ -27,8 +29,7 @@ func TestParseMembership(t *testing.T) {
 		change("user:alice@example.com", "assignee", "role:apis_kcp_io_apiexport/abc/export/owner"),
 		change("user:alice@example.com", "assignee", "role:core_platform-mesh_io_account/abc/team-a"),
 	} {
-		if got, ok := parseMembership(c); ok {
-			t.Errorf("%+v should not be a membership, got %+v", c.TupleKey, got)
-		}
+		_, ok := parseMembership(c)
+		assert.False(t, ok, "%+v is not a membership", c.TupleKey)
 	}
 }

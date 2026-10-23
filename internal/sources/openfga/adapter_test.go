@@ -16,6 +16,8 @@ import (
 	"time"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/platform-mesh/contrib-eventing/internal/contract"
 	"go.platform-mesh.io/golang-commons/logger/testlogger"
@@ -60,28 +62,27 @@ func TestPublishNew(t *testing.T) {
 	}
 
 	st := orgState{StoreID: "store-1", Since: time.Now()}
-	if moved, err := a.publishNew(context.Background(), "acme", &st); err == nil || moved || st.Token != "" {
-		t.Fatalf("a failed page must not move the token: moved=%v err=%v state=%+v", moved, err, st)
-	}
+	moved, err := a.publishNew(context.Background(), "acme", &st)
+	require.Error(t, err)
+	assert.False(t, moved, "a failed page must not move the token")
+	assert.Empty(t, st.Token)
 
 	fail, published = false, nil
-	if moved, err := a.publishNew(context.Background(), "acme", &st); err != nil || !moved || st.Token != "after-page" {
-		t.Fatalf("moved=%v err=%v state=%+v", moved, err, st)
-	}
-	if len(published) != 2 {
-		t.Fatalf("published %d events", len(published))
-	}
+	moved, err = a.publishNew(context.Background(), "acme", &st)
+	require.NoError(t, err)
+	assert.True(t, moved)
+	assert.Equal(t, "after-page", st.Token)
+	require.Len(t, published, 2)
 
 	var granted, revoked contract.Membership
-	_ = json.Unmarshal(published[0].Data(), &granted)
-	_ = json.Unmarshal(published[1].Data(), &revoked)
-	if published[0].Type() != contract.TypeMembershipGranted || granted.User != (contract.User{ID: "alice-id"}) {
-		t.Errorf("granted: %s %+v", published[0].Type(), granted)
-	}
+	require.NoError(t, json.Unmarshal(published[0].Data(), &granted))
+	require.NoError(t, json.Unmarshal(published[1].Data(), &revoked))
+	assert.Equal(t, contract.TypeMembershipGranted, published[0].Type())
+	assert.Equal(t, contract.User{ID: "alice-id"}, granted.User)
 	// new@example.com has no Keycloak user yet, so the event carries the email.
-	if published[1].Type() != contract.TypeMembershipRevoked || revoked.User != (contract.User{Email: "new@example.com"}) || revoked.Role != "owner" {
-		t.Errorf("revoked: %s %+v", published[1].Type(), revoked)
-	}
+	assert.Equal(t, contract.TypeMembershipRevoked, published[1].Type())
+	assert.Equal(t, contract.User{Email: "new@example.com"}, revoked.User)
+	assert.Equal(t, "owner", revoked.Role)
 }
 
 // An org that was deleted and created again has a new store. The old token
@@ -108,17 +109,17 @@ func TestPublishNewWithRecreatedStore(t *testing.T) {
 	}
 	st := orgState{StoreID: "old-store", Token: "old-token", Since: time.Now().Add(-time.Hour)}
 
-	if _, err := a.publishNew(context.Background(), "acme", &st); err == nil {
-		t.Fatal("expected an error for the deleted store")
-	}
-	if moved, err := a.publishNew(context.Background(), "acme", &st); err != nil || !moved {
-		t.Fatalf("moved=%v err=%v", moved, err)
-	}
-	if st.StoreID != "new-store" || st.Token != "" || time.Since(st.Since) > time.Minute {
-		t.Errorf("state should start fresh on the new store: %+v", st)
-	}
+	_, err := a.publishNew(context.Background(), "acme", &st)
+	require.Error(t, err, "the old store is gone")
+
+	moved, err := a.publishNew(context.Background(), "acme", &st)
+	require.NoError(t, err)
+	assert.True(t, moved)
+	assert.Equal(t, "new-store", st.StoreID)
+	assert.Empty(t, st.Token)
+	assert.WithinDuration(t, time.Now(), st.Since, time.Minute)
+
 	last := requests[len(requests)-1]
-	if !strings.HasPrefix(last, "/stores/new-store/changes?") || strings.Contains(last, "old-token") {
-		t.Errorf("last request %s", last)
-	}
+	assert.True(t, strings.HasPrefix(last, "/stores/new-store/changes?"), last)
+	assert.NotContains(t, last, "old-token")
 }

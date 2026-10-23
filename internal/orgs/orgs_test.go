@@ -5,7 +5,11 @@ SPDX-License-Identifier: Apache-2.0
 
 package orgs
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+)
 
 func TestFromPath(t *testing.T) {
 	for path, want := range map[string]string{
@@ -16,8 +20,7 @@ func TestFromPath(t *testing.T) {
 		"root:orgs:":            "",
 	} {
 		got, ok := FromPath(path)
-		if got != want || ok != (want != "") {
-			t.Errorf("FromPath(%q) = %q, %v; want %q", path, got, ok, want)
-		}
+		assert.Equal(t, want, got, path)
+		assert.Equal(t, want != "", ok, path)
 	}
 }
