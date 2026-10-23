@@ -19,13 +19,14 @@ import (
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	cehttp "github.com/cloudevents/sdk-go/v2/protocol/http"
 	"github.com/go-logr/logr"
-	authv1 "k8s.io/api/authentication/v1"
-	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/platform-mesh/contrib-eventing/internal/contract"
 	"github.com/platform-mesh/contrib-eventing/internal/orgs"
+
+	authenticationv1 "k8s.io/api/authentication/v1"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	ctrlruntimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // Authenticator returns the user a bearer token belongs to.
@@ -38,7 +39,7 @@ type Handler struct {
 	// Publishers may send events for any org. For now these are the platform's
 	// own adapters; providers publishing for their orgs come later.
 	Publishers []string
-	Kube       client.Client
+	Kube       ctrlruntimeclient.Client
 	// Forward hands an accepted event to the org's broker.
 	Forward func(ctx context.Context, org string, e cloudevents.Event) error
 	Log     logr.Logger
@@ -79,7 +80,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// An org without a broker has no Subscriptions. The event is accepted
 	// and dropped, so publishers don't retry it.
-	if err := h.Kube.Get(r.Context(), client.ObjectKey{Name: orgs.Namespace(org)}, &corev1.Namespace{}); err != nil {
+	if err := h.Kube.Get(r.Context(), ctrlruntimeclient.ObjectKey{Name: orgs.Namespace(org)}, &corev1.Namespace{}); err != nil {
 		if apierrors.IsNotFound(err) {
 			h.Log.Info("dropped event, org has no subscriptions", "org", org, "id", e.ID())
 			w.WriteHeader(http.StatusAccepted)
@@ -100,12 +101,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // TokenReviewer authenticates Kubernetes ServiceAccount tokens that were
 // issued for Audience.
 type TokenReviewer struct {
-	Kube     client.Client
+	Kube     ctrlruntimeclient.Client
 	Audience string
 }
 
 func (t *TokenReviewer) Authenticate(ctx context.Context, token string) (string, error) {
-	review := &authv1.TokenReview{Spec: authv1.TokenReviewSpec{Token: token, Audiences: []string{t.Audience}}}
+	review := &authenticationv1.TokenReview{Spec: authenticationv1.TokenReviewSpec{Token: token, Audiences: []string{t.Audience}}}
 	if err := t.Kube.Create(ctx, review); err != nil {
 		return "", err
 	}

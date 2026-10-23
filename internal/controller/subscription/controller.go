@@ -14,20 +14,21 @@ import (
 	"fmt"
 	"time"
 
-	kcpcorev1alpha1 "github.com/kcp-dev/sdk/apis/core/v1alpha1"
+	"github.com/platform-mesh/contrib-eventing/api/v1alpha1"
+	"github.com/platform-mesh/contrib-eventing/internal/delivery/knative"
+	"github.com/platform-mesh/contrib-eventing/internal/orgs"
+
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	ctrlruntimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	mcbuilder "sigs.k8s.io/multicluster-runtime/pkg/builder"
 	mcmanager "sigs.k8s.io/multicluster-runtime/pkg/manager"
 	mcreconcile "sigs.k8s.io/multicluster-runtime/pkg/reconcile"
 
-	"github.com/platform-mesh/contrib-eventing/api/v1alpha1"
-	"github.com/platform-mesh/contrib-eventing/internal/delivery/knative"
-	"github.com/platform-mesh/contrib-eventing/internal/orgs"
+	kcpcorev1alpha1 "github.com/kcp-dev/sdk/apis/core/v1alpha1"
 )
 
 const finalizer = "eventing.platform-mesh.io/delivery"
@@ -60,7 +61,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req mcreconcile.Request) (ct
 
 	sub := &v1alpha1.Subscription{}
 	if err := c.Get(ctx, req.NamespacedName, sub); err != nil {
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+		return ctrl.Result{}, ctrlruntimeclient.IgnoreNotFound(err)
 	}
 	trigger := triggerName(string(req.ClusterName), sub.Name)
 
@@ -71,7 +72,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req mcreconcile.Request) (ct
 			}
 		}
 		controllerutil.RemoveFinalizer(sub, finalizer)
-		return ctrl.Result{}, client.IgnoreNotFound(c.Update(ctx, sub))
+		return ctrl.Result{}, ctrlruntimeclient.IgnoreNotFound(c.Update(ctx, sub))
 	}
 	if controllerutil.AddFinalizer(sub, finalizer) {
 		if err := c.Update(ctx, sub); err != nil {
@@ -82,7 +83,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req mcreconcile.Request) (ct
 	// The workspace path is only on the LogicalCluster object, which we can read
 	// because of the logicalclusters permission claim on the APIExport.
 	lc := &kcpcorev1alpha1.LogicalCluster{}
-	if err := c.Get(ctx, client.ObjectKey{Name: "cluster"}, lc); err != nil {
+	if err := c.Get(ctx, ctrlruntimeclient.ObjectKey{Name: "cluster"}, lc); err != nil {
 		if apierrors.IsForbidden(err) || apierrors.IsNotFound(err) {
 			return r.setStatus(ctx, c, sub, "", knative.Status{
 				Reason:  "ClaimNotAccepted",
@@ -112,7 +113,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req mcreconcile.Request) (ct
 	return r.setStatus(ctx, c, sub, org, status, requeue)
 }
 
-func (r *Reconciler) setStatus(ctx context.Context, c client.Client, sub *v1alpha1.Subscription, org string, s knative.Status, requeue time.Duration) (ctrl.Result, error) {
+func (r *Reconciler) setStatus(ctx context.Context, c ctrlruntimeclient.Client, sub *v1alpha1.Subscription, org string, s knative.Status, requeue time.Duration) (ctrl.Result, error) {
 	cond := metav1.Condition{
 		Type:               "Ready",
 		Status:             metav1.ConditionFalse,
@@ -127,7 +128,7 @@ func (r *Reconciler) setStatus(ctx context.Context, c client.Client, sub *v1alph
 	sub.Status.ObservedGeneration = sub.Generation
 	meta.SetStatusCondition(&sub.Status.Conditions, cond)
 	if err := c.Status().Update(ctx, sub); err != nil {
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+		return ctrl.Result{}, ctrlruntimeclient.IgnoreNotFound(err)
 	}
 	return ctrl.Result{RequeueAfter: requeue}, nil
 }

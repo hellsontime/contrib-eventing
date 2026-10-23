@@ -14,15 +14,16 @@ import (
 	"time"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
-	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/client-go/rest"
-	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	"github.com/platform-mesh/contrib-eventing/internal/keycloak"
 	"github.com/platform-mesh/contrib-eventing/internal/publish"
 	"github.com/platform-mesh/contrib-eventing/internal/sources/openfga"
+
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
+	ctrl "sigs.k8s.io/controller-runtime"
+	ctrlruntimeclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
 // runOpenFGAAdapter reads the OpenFGA changelog of subscribed orgs and sends
@@ -50,7 +51,7 @@ func runOpenFGAAdapter(args []string) error {
 	if err != nil {
 		return fmt.Errorf("in-cluster config: %w", err)
 	}
-	kube, err := client.New(cfg, client.Options{Scheme: clientgoscheme.Scheme})
+	kube, err := ctrlruntimeclient.New(cfg, ctrlruntimeclient.Options{Scheme: clientgoscheme.Scheme})
 	if err != nil {
 		return err
 	}

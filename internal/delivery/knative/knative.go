@@ -12,15 +12,15 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/platform-mesh/contrib-eventing/api/v1alpha1"
+	"github.com/platform-mesh/contrib-eventing/internal/orgs"
+
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	ctrlruntimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-
-	"github.com/platform-mesh/contrib-eventing/api/v1alpha1"
-	"github.com/platform-mesh/contrib-eventing/internal/orgs"
 )
 
 const brokerName = "default"
@@ -38,7 +38,7 @@ type Status struct {
 }
 
 type Backend struct {
-	Client client.Client
+	Client ctrlruntimeclient.Client
 }
 
 // Ensure makes sure the organization has a Broker and the Subscription has a
@@ -69,7 +69,7 @@ func (b *Backend) Delete(ctx context.Context, org, trigger string) error {
 	t.SetGroupVersionKind(triggerGVK)
 	t.SetNamespace(orgs.Namespace(org))
 	t.SetName(trigger)
-	return client.IgnoreNotFound(b.Client.Delete(ctx, t))
+	return ctrlruntimeclient.IgnoreNotFound(b.Client.Delete(ctx, t))
 }
 
 func (b *Backend) ensureBroker(ctx context.Context, org, ns string) error {
@@ -98,7 +98,7 @@ func (b *Backend) ensureBroker(ctx context.Context, org, ns string) error {
 // triggerSpec translates a Subscription into a Trigger spec. The filter keeps
 // events whose type is any of the listed types.
 func triggerSpec(sub *v1alpha1.Subscription) map[string]any {
-	var anyOf []any
+	anyOf := make([]any, 0, len(sub.Spec.Filter.Types))
 	for _, t := range sub.Spec.Filter.Types {
 		anyOf = append(anyOf, map[string]any{"exact": map[string]any{"type": t}})
 	}

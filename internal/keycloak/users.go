@@ -45,7 +45,7 @@ func (u *Users) IDByEmail(ctx context.Context, realm, email string) (string, err
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 	if resp.StatusCode != http.StatusOK {
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
 		return "", fmt.Errorf("looking up user in realm %s: %s: %s", realm, resp.Status, msg)

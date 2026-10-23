@@ -16,12 +16,13 @@ import (
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/go-logr/logr"
-	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/platform-mesh/contrib-eventing/internal/contract"
 	"github.com/platform-mesh/contrib-eventing/internal/orgs"
+
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	ctrlruntimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
@@ -39,7 +40,7 @@ type UserIDs interface {
 type Adapter struct {
 	FGA       *Client
 	Users     UserIDs
-	Kube      client.Client
+	Kube      ctrlruntimeclient.Client
 	Namespace string
 	Publish   func(ctx context.Context, e cloudevents.Event) error
 	Interval  time.Duration
@@ -74,7 +75,7 @@ func (a *Adapter) Run(ctx context.Context) error {
 func (a *Adapter) poll(ctx context.Context) error {
 	// Orgs with a Subscription have a broker namespace.
 	var nss corev1.NamespaceList
-	if err := a.Kube.List(ctx, &nss, client.HasLabels{orgs.Label}); err != nil {
+	if err := a.Kube.List(ctx, &nss, ctrlruntimeclient.HasLabels{orgs.Label}); err != nil {
 		return err
 	}
 	cm, state, err := a.loadState(ctx)
@@ -181,7 +182,7 @@ func (a *Adapter) storeID(ctx context.Context, org string) (string, error) {
 func (a *Adapter) loadState(ctx context.Context) (*corev1.ConfigMap, map[string]orgState, error) {
 	cm := &corev1.ConfigMap{}
 	state := map[string]orgState{}
-	err := a.Kube.Get(ctx, client.ObjectKey{Namespace: a.Namespace, Name: StateConfigMap}, cm)
+	err := a.Kube.Get(ctx, ctrlruntimeclient.ObjectKey{Namespace: a.Namespace, Name: StateConfigMap}, cm)
 	if apierrors.IsNotFound(err) {
 		cm.Namespace, cm.Name = a.Namespace, StateConfigMap
 		return cm, state, nil

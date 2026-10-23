@@ -22,7 +22,9 @@ import (
 
 type fakeUsers map[string]string
 
-func (f fakeUsers) IDByEmail(_ context.Context, _, email string) (string, error) { return f[email], nil }
+func (f fakeUsers) IDByEmail(_ context.Context, _, email string) (string, error) {
+	return f[email], nil
+}
 
 func TestPublishNew(t *testing.T) {
 	changes := `{"changes": [

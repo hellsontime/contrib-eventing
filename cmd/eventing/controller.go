@@ -10,24 +10,25 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/kcp-dev/multicluster-provider/apiexport"
-	kcpapisv1alpha1 "github.com/kcp-dev/sdk/apis/apis/v1alpha1"
-	kcpcorev1alpha1 "github.com/kcp-dev/sdk/apis/core/v1alpha1"
+	"github.com/platform-mesh/contrib-eventing/api/v1alpha1"
+	"github.com/platform-mesh/contrib-eventing/internal/controller/subscription"
+	"github.com/platform-mesh/contrib-eventing/internal/delivery/knative"
+
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	ctrlruntimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	mcmanager "sigs.k8s.io/multicluster-runtime/pkg/manager"
 
-	"github.com/platform-mesh/contrib-eventing/api/v1alpha1"
-	"github.com/platform-mesh/contrib-eventing/internal/controller/subscription"
-	"github.com/platform-mesh/contrib-eventing/internal/delivery/knative"
+	"github.com/kcp-dev/multicluster-provider/apiexport"
+	kcpapisv1alpha1 "github.com/kcp-dev/sdk/apis/apis/v1alpha1"
+	kcpcorev1alpha1 "github.com/kcp-dev/sdk/apis/core/v1alpha1"
 )
 
 // runController watches Subscriptions in kcp and manages Knative objects on the
@@ -85,7 +86,7 @@ func runController(args []string) error {
 	if err != nil {
 		return fmt.Errorf("in-cluster config: %w", err)
 	}
-	localClient, err := client.New(localCfg, client.Options{Scheme: scheme})
+	localClient, err := ctrlruntimeclient.New(localCfg, ctrlruntimeclient.Options{Scheme: scheme})
 	if err != nil {
 		return err
 	}
