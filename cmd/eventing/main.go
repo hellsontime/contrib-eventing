@@ -16,7 +16,8 @@ const usage = `usage: eventing <component> [flags]
 
 components:
   subscription-controller   turns Subscriptions in kcp into Knative Brokers and Triggers
-  keycloak-adapter          publishes Keycloak login events as CloudEvents
+  openfga-adapter           publishes membership changes from the OpenFGA changelog
+  ingress                   checks publishers and hands their events to the brokers
 `
 
 func main() {
@@ -29,6 +30,10 @@ func main() {
 	switch component, args := os.Args[1], os.Args[2:]; component {
 	case "subscription-controller":
 		err = runController(args)
+	case "openfga-adapter":
+		err = runOpenFGAAdapter(args)
+	case "ingress":
+		err = runIngress(args)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown component %q\n\n%s", component, usage)
 		os.Exit(2)
