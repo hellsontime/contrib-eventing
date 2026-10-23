@@ -15,10 +15,10 @@ import (
 	"time"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
-	"github.com/go-logr/logr"
 
 	"github.com/platform-mesh/contrib-eventing/internal/contract"
 	"github.com/platform-mesh/contrib-eventing/internal/orgs"
+	"go.platform-mesh.io/golang-commons/logger"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -44,7 +44,7 @@ type Adapter struct {
 	Namespace string
 	Publish   func(ctx context.Context, e cloudevents.Event) error
 	Interval  time.Duration
-	Log       logr.Logger
+	Log       *logger.Logger
 
 	storeIDs map[string]string
 }
@@ -65,7 +65,7 @@ func (a *Adapter) Run(ctx context.Context) error {
 	defer t.Stop()
 	for {
 		if err := a.poll(ctx); err != nil {
-			a.Log.Error(err, "poll failed")
+			a.Log.Error().Err(err).Msg("poll failed")
 		}
 		select {
 		case <-ctx.Done():
@@ -95,7 +95,7 @@ func (a *Adapter) poll(ctx context.Context) error {
 		}
 		moved, err := a.publishNew(ctx, org, &st)
 		if err != nil {
-			a.Log.Error(err, "cannot publish membership changes", "org", org)
+			a.Log.Error().Err(err).Str("org", org).Msg("cannot publish membership changes")
 		}
 		if moved || !known {
 			state[org] = st
@@ -171,7 +171,7 @@ func (a *Adapter) publishChange(ctx context.Context, org string, c Change) error
 	if err := a.Publish(ctx, e); err != nil {
 		return err
 	}
-	a.Log.Info("published", "org", org, "type", e.Type(), "id", e.ID())
+	a.Log.Info().Str("org", org).Str("type", e.Type()).Str("id", e.ID()).Msg("published")
 	return nil
 }
 
@@ -204,7 +204,7 @@ func (a *Adapter) loadState(ctx context.Context) (*corev1.ConfigMap, map[string]
 	for org, raw := range cm.Data {
 		var st orgState
 		if err := json.Unmarshal([]byte(raw), &st); err != nil {
-			a.Log.Error(err, "ignoring broken state", "org", org)
+			a.Log.Error().Err(err).Str("org", org).Msg("ignoring broken state")
 			continue
 		}
 		state[org] = st

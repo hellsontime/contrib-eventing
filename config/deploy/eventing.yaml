@@ -112,7 +112,7 @@ spec:
           imagePullPolicy: Never
           args: [subscription-controller, --kcp-kubeconfig=/kcp/kubeconfig]
           readinessProbe:
-            httpGet: {path: /readyz, port: 8081}
+            httpGet: {path: /readyz, port: 8090}
           volumeMounts:
             # The whole Secret, because the kubeconfig reads the rotating token
             # from the file next to it.

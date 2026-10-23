@@ -18,10 +18,10 @@ import (
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	cehttp "github.com/cloudevents/sdk-go/v2/protocol/http"
-	"github.com/go-logr/logr"
 
 	"github.com/platform-mesh/contrib-eventing/internal/contract"
 	"github.com/platform-mesh/contrib-eventing/internal/orgs"
+	"go.platform-mesh.io/golang-commons/logger"
 
 	authenticationv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -42,7 +42,7 @@ type Handler struct {
 	Kube       ctrlruntimeclient.Client
 	// Forward hands an accepted event to the org's broker.
 	Forward func(ctx context.Context, org string, e cloudevents.Event) error
-	Log     logr.Logger
+	Log     *logger.Logger
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -57,12 +57,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	sender, err := h.Auth.Authenticate(r.Context(), token)
 	if err != nil {
-		h.Log.Info("rejected unauthenticated request", "reason", err.Error())
+		h.Log.Info().Err(err).Msg("rejected unauthenticated request")
 		http.Error(w, "invalid token", http.StatusUnauthorized)
 		return
 	}
 	if !slices.Contains(h.Publishers, sender) {
-		h.Log.Info("rejected sender", "sender", sender)
+		h.Log.Info().Str("sender", sender).Msg("rejected sender")
 		http.Error(w, sender+" may not publish", http.StatusForbidden)
 		return
 	}
@@ -82,7 +82,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// and dropped, so publishers don't retry it.
 	if err := h.Kube.Get(r.Context(), ctrlruntimeclient.ObjectKey{Name: orgs.Namespace(org)}, &corev1.Namespace{}); err != nil {
 		if apierrors.IsNotFound(err) {
-			h.Log.Info("dropped event, org has no subscriptions", "org", org, "id", e.ID())
+			h.Log.Info().Str("org", org).Str("id", e.ID()).Msg("dropped event, org has no subscriptions")
 			w.WriteHeader(http.StatusAccepted)
 			return
 		}
@@ -90,11 +90,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.Forward(r.Context(), org, *e); err != nil {
-		h.Log.Error(err, "forwarding failed", "org", org, "id", e.ID())
+		h.Log.Error().Err(err).Str("org", org).Str("id", e.ID()).Msg("forwarding failed")
 		http.Error(w, "broker did not accept the event", http.StatusBadGateway)
 		return
 	}
-	h.Log.Info("forwarded", "sender", sender, "org", org, "type", e.Type(), "id", e.ID())
+	h.Log.Info().Str("sender", sender).Str("org", org).Str("type", e.Type()).Str("id", e.ID()).Msg("forwarded")
 	w.WriteHeader(http.StatusAccepted)
 }
 

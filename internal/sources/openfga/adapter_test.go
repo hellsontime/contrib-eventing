@@ -16,9 +16,9 @@ import (
 	"time"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
-	"github.com/go-logr/logr"
 
 	"github.com/platform-mesh/contrib-eventing/internal/contract"
+	"go.platform-mesh.io/golang-commons/logger/testlogger"
 )
 
 type fakeUsers map[string]string
@@ -48,7 +48,7 @@ func TestPublishNew(t *testing.T) {
 	a := &Adapter{
 		FGA:      &Client{BaseURL: srv.URL, HTTP: srv.Client()},
 		Users:    fakeUsers{"alice@example.com": "alice-id"},
-		Log:      logr.Discard(),
+		Log:      testlogger.New().HideLogOutput().Logger,
 		storeIDs: map[string]string{"acme": "store-1"},
 		Publish: func(_ context.Context, e cloudevents.Event) error {
 			if fail && len(published) == 1 {
@@ -103,7 +103,7 @@ func TestPublishNewWithRecreatedStore(t *testing.T) {
 
 	a := &Adapter{
 		FGA:      &Client{BaseURL: srv.URL, HTTP: srv.Client()},
-		Log:      logr.Discard(),
+		Log:      testlogger.New().HideLogOutput().Logger,
 		storeIDs: map[string]string{"acme": "old-store"},
 	}
 	st := orgState{StoreID: "old-store", Token: "old-token", Since: time.Now().Add(-time.Hour)}

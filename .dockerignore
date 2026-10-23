@@ -6,3 +6,4 @@
 !cmd/
 !api/
 !internal/
+!main.go

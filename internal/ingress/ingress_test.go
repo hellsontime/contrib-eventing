@@ -14,7 +14,8 @@ import (
 	"testing"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
-	"github.com/go-logr/logr"
+
+	"go.platform-mesh.io/golang-commons/logger/testlogger"
 
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -37,7 +38,7 @@ func TestHandler(t *testing.T) {
 		Auth:       fakeAuth{"adapter": "system:serviceaccount:contrib-eventing:openfga-adapter", "other": "system:serviceaccount:default:x"},
 		Publishers: []string{"system:serviceaccount:contrib-eventing:openfga-adapter"},
 		Kube:       fake.NewClientBuilder().WithObjects(broker).Build(),
-		Log:        logr.Discard(),
+		Log:        testlogger.New().HideLogOutput().Logger,
 		Forward: func(_ context.Context, org string, _ cloudevents.Event) error {
 			forwarded = append(forwarded, org)
 			return nil
