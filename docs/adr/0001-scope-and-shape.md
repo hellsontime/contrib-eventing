@@ -65,7 +65,8 @@ Because Knative stays behind our API, moving to B or C later changes nothing for
 
 - Do consumers need snapshots in addition to changes?
 - Which durable broker class is the default for production?
-- How does the module map a kcp workspace to its org name without admin access?
+- ~~How does the module map a kcp workspace to its org name without admin access?~~
+  A permission claim on `logicalclusters` gives the controller the workspace path.
 
 ## References
 

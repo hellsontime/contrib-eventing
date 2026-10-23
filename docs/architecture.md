@@ -50,7 +50,9 @@ Account-level and installation-wide subscriptions are not in the first milestone
 
 The module does not change Platform Mesh components. It needs:
 
-- an APIExport for the Subscription API that orgs bind to;
+- an APIExport for the Subscription API that orgs bind to, with a permission
+  claim on `logicalclusters`. The controller reads the workspace path from it,
+  which gives it the org name;
 - read access to the OpenFGA changelog;
 - Knative Eventing installed in the cluster.
 
@@ -68,4 +70,3 @@ These came out of the [spike](https://github.com/platform-mesh/backlog/issues/42
 
 - The Knative broker ingress accepts any event from inside the cluster, which is why our own ingress sits in front of it.
 - Subscriptions accept any URL. Targets should be limited by an allowlist that the platform operator controls.
-- Mapping a kcp workspace to its org name used admin access in the spike and needs a proper permission.

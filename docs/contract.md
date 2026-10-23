@@ -52,7 +52,7 @@ Sent when a user gets or loses a role on an account.
 | `org` | yes | org name |
 | `account` | yes | account name |
 | `role` | yes | Platform Mesh role, for example `owner` or `member` |
-| `user.id` | if known | the user's OIDC subject (`sub`), stable across email changes |
+| `user.id` | if known | the user's OIDC subject (`sub`) in the org's Keycloak realm, stable across email changes. The same person has a different `sub` in another org. |
 | `user.email` | only without `user.id` | set for invited users who have not logged in yet and therefore have no `sub` |
 
 At least one of `user.id` and `user.email` is always present.
