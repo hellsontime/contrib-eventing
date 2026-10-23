@@ -47,10 +47,14 @@ kcp() {
 }
 
 # keycloak <method> <path below /keycloak> [curl args...]
-# Calls Keycloak through the ingress with the admin token from keycloak_login.
+# Calls Keycloak through the ingress as the Keycloak admin. Admin tokens of the
+# master realm live 60 seconds, so we log in again when ours is older than 30.
 keycloak() {
   local method=$1 path=$2
   shift 2
+  if [[ -z ${KEYCLOAK_TOKEN:-} ]] || ((SECONDS - ${KEYCLOAK_TOKEN_AT:-0} > 30)); then
+    keycloak_login
+  fi
   curl -sS --fail-with-body --cacert "$SECRET_DIR/domain-ca.crt" \
     --resolve "$BASE_DOMAIN:$PORT:$INGRESS_ADDRESS" \
     -X "$method" -H "Authorization: Bearer $KEYCLOAK_TOKEN" \
@@ -68,7 +72,7 @@ keycloak_login() {
     "https://$BASE_DOMAIN:$PORT/keycloak/realms/master/protocol/openid-connect/token" \
     -d grant_type=password -d client_id=admin-cli \
     --data-urlencode "username=$user" --data-urlencode "password=$pass" | jq -r .access_token)
-  export KEYCLOAK_TOKEN
+  KEYCLOAK_TOKEN_AT=$SECONDS
 }
 
 # wait_for <description> <timeout seconds> <command...>

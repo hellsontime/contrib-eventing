@@ -1,0 +1,8 @@
+# Only Go sources go into the image build. Keeps credentials in .secret out of
+# the build and makes the image id depend on the code only.
+*
+!go.mod
+!go.sum
+!cmd/
+!api/
+!internal/
