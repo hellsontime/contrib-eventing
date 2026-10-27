@@ -167,3 +167,24 @@ func TestPollOrgs(t *testing.T) {
 	require.NoError(t, a.Kube.Get(ctx, ctrlruntimeclient.ObjectKey{Namespace: "contrib-eventing", Name: StateConfigMap}, cm))
 	assert.Len(t, cm.Data, 1)
 }
+
+// When the first run finds no org at all, the first org created afterwards
+// must still start at the beginning of its store.
+func TestPollFirstOrgAfterEmptyStart(t *testing.T) {
+	fga := &fakeFGA{stores: map[string]string{"orgs": "s-root"}}
+	srv := httptest.NewServer(fga)
+	defer srv.Close()
+	a := &Adapter{
+		FGA:        &Client{BaseURL: srv.URL, HTTP: srv.Client()},
+		SkipStores: []string{"orgs"},
+		Kube:       fake.NewClientBuilder().Build(),
+		Namespace:  "contrib-eventing",
+		Log:        testlogger.New().HideLogOutput().Logger,
+	}
+	require.NoError(t, a.poll(context.Background()))
+
+	fga.stores["acme"] = "s-acme"
+	require.NoError(t, a.poll(context.Background()))
+	require.Len(t, fga.asked("s-acme"), 1)
+	assert.NotContains(t, fga.asked("s-acme")[0], "start_time=")
+}

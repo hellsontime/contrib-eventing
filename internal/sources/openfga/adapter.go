@@ -89,7 +89,9 @@ func (a *Adapter) poll(ctx context.Context) error {
 	// first changes, like the owner of a new org, are not missed.
 	firstRun := cm.ResourceVersion == ""
 
-	changed := false
+	// The first run always saves, even without orgs, so the next run knows it
+	// is not the first.
+	changed := firstRun
 	for org, storeID := range stores {
 		if slices.Contains(a.SkipStores, org) {
 			continue
