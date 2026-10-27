@@ -15,7 +15,9 @@ const accountType = "core_platform-mesh_io_account"
 type membership struct {
 	account string
 	role    string
-	email   string
+	// user is the user as the tuple has it: the value of the configured user
+	// claim, or the email of an invited user.
+	user string
 }
 
 // parseMembership reads a tuple like
@@ -33,5 +35,5 @@ func parseMembership(c Change) (membership, bool) {
 	if !strings.HasPrefix(k.Object, "role:") || len(parts) != 4 || parts[0] != accountType || parts[2] == "" || parts[3] == "" {
 		return membership{}, false
 	}
-	return membership{account: parts[2], role: parts[3], email: strings.TrimPrefix(k.User, "user:")}, true
+	return membership{account: parts[2], role: parts[3], user: strings.TrimPrefix(k.User, "user:")}, true
 }

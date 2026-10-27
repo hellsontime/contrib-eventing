@@ -66,13 +66,14 @@ func (c *Client) StoreIDs(ctx context.Context) (map[string]string, error) {
 }
 
 // Changes returns changes on objects of the given type. Without a continuation
-// token it starts at start. The returned token marks the end of this page; if
-// there was nothing new, it is the token that was passed in (or empty).
+// token it starts at start, or at the beginning if start is zero. The returned
+// token marks the end of this page; if there was nothing new, it is the token
+// that was passed in (or empty).
 func (c *Client) Changes(ctx context.Context, storeID, objectType, token string, start time.Time, pageSize int) ([]Change, string, error) {
 	q := url.Values{"type": {objectType}, "page_size": {strconv.Itoa(pageSize)}}
 	if token != "" {
 		q.Set("continuation_token", token)
-	} else {
+	} else if !start.IsZero() {
 		q.Set("start_time", start.UTC().Format(time.RFC3339))
 	}
 	var resp struct {

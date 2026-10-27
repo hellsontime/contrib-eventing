@@ -12,12 +12,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 
 	"github.com/platform-mesh/contrib-eventing/internal/contract"
-	"github.com/platform-mesh/contrib-eventing/internal/orgs"
 	"go.platform-mesh.io/golang-commons/logger"
 
 	corev1 "k8s.io/api/core/v1"
@@ -31,22 +32,20 @@ const (
 	pageSize       = 50
 )
 
-// UserIDs resolves an email to the user's id in the org's realm, or "" if the
-// user does not exist there yet.
-type UserIDs interface {
-	IDByEmail(ctx context.Context, realm, email string) (string, error)
-}
-
+// Adapter reads the changelog of every org's OpenFGA store. Platform Mesh
+// gives each org a store named like the org.
 type Adapter struct {
-	FGA       *Client
-	Users     UserIDs
-	Kube      ctrlruntimeclient.Client
-	Namespace string
-	Publish   func(ctx context.Context, e cloudevents.Event) error
-	Interval  time.Duration
-	Log       *logger.Logger
-
-	storeIDs map[string]string
+	FGA *Client
+	// UserClaim is the claim Platform Mesh identifies users by ("email" or
+	// "sub"); tuples hold the user under that claim.
+	UserClaim string
+	// SkipStores are stores that do not belong to an org.
+	SkipStores []string
+	Kube       ctrlruntimeclient.Client
+	Namespace  string
+	Publish    func(ctx context.Context, e cloudevents.Event) error
+	Interval   time.Duration
+	Log        *logger.Logger
 }
 
 // orgState is stored as JSON in the state ConfigMap, one key per org.
@@ -56,8 +55,9 @@ type orgState struct {
 	StoreID string `json:"storeID,omitempty"`
 	// Token is the OpenFGA continuation token after the last published change.
 	Token string `json:"token,omitempty"`
-	// Since is when the org subscribed. Changes before it are not published.
-	Since time.Time `json:"since"`
+	// Since is where reading starts while there is no token yet. Zero means the
+	// beginning of the store.
+	Since time.Time `json:"since,omitzero"`
 }
 
 func (a *Adapter) Run(ctx context.Context) error {
@@ -76,29 +76,45 @@ func (a *Adapter) Run(ctx context.Context) error {
 }
 
 func (a *Adapter) poll(ctx context.Context) error {
-	// Orgs with a Subscription have a broker namespace.
-	var nss corev1.NamespaceList
-	if err := a.Kube.List(ctx, &nss, ctrlruntimeclient.HasLabels{orgs.Label}); err != nil {
+	stores, err := a.FGA.StoreIDs(ctx)
+	if err != nil {
 		return err
 	}
 	cm, state, err := a.loadState(ctx)
 	if err != nil {
 		return err
 	}
+	// On the very first run there is no state yet: orgs that exist already start
+	// now. Orgs created later start at the beginning of their store, so their
+	// first changes, like the owner of a new org, are not missed.
+	firstRun := cm.ResourceVersion == ""
+
 	changed := false
-	for _, ns := range nss.Items {
-		org := ns.Labels[orgs.Label]
+	for org, storeID := range stores {
+		if slices.Contains(a.SkipStores, org) {
+			continue
+		}
 		st, known := state[org]
-		if !known {
-			st = orgState{Since: time.Now()}
-			changed = true
+		fresh := !known || st.StoreID != storeID
+		if fresh {
+			st = orgState{StoreID: storeID}
+			if firstRun {
+				st.Since = time.Now()
+			}
 		}
 		moved, err := a.publishNew(ctx, org, &st)
 		if err != nil {
 			a.Log.Error().Err(err).Str("org", org).Msg("cannot publish membership changes")
 		}
-		if moved || !known {
+		if moved || fresh {
 			state[org] = st
+			changed = true
+		}
+	}
+	// Forget orgs whose store is gone.
+	for org := range state {
+		if _, ok := stores[org]; !ok {
+			delete(state, org)
 			changed = true
 		}
 	}
@@ -112,22 +128,10 @@ func (a *Adapter) poll(ctx context.Context) error {
 // token only moves after every event of a page was accepted; if one fails, the
 // whole page is read again next time. Consumers drop the repeats by event id.
 func (a *Adapter) publishNew(ctx context.Context, org string, st *orgState) (bool, error) {
-	storeID, err := a.storeID(ctx, org)
-	if err != nil {
-		return false, err
-	}
 	moved := false
-	if st.StoreID != storeID {
-		// A new store, for example because the org was deleted and created
-		// again. Start at the current time, like for a newly subscribed org.
-		*st = orgState{StoreID: storeID, Since: time.Now()}
-		moved = true
-	}
 	for {
-		changes, next, err := a.FGA.Changes(ctx, storeID, "role", st.Token, st.Since, pageSize)
+		changes, next, err := a.FGA.Changes(ctx, st.StoreID, "role", st.Token, st.Since, pageSize)
 		if err != nil {
-			// The store may be gone; look it up again next time.
-			delete(a.storeIDs, org)
 			return moved, err
 		}
 		for _, c := range changes {
@@ -150,21 +154,9 @@ func (a *Adapter) publishChange(ctx context.Context, org string, c Change) error
 	if !ok {
 		return nil
 	}
-	// Events identify users by id. Only users without a Keycloak account
-	// (invited, never logged in) are identified by email.
-	user := contract.User{}
-	id, err := a.Users.IDByEmail(ctx, org, m.email)
-	if err != nil {
-		return err
-	}
-	if id != "" {
-		user.ID = id
-	} else {
-		user.Email = m.email
-	}
 	granted := c.Operation == opWrite
 	key := fmt.Sprintf("openfga/%s/%s/%s/%s/%s", c.Operation, c.TupleKey.User, c.TupleKey.Relation, c.TupleKey.Object, c.Timestamp.Format(time.RFC3339Nano))
-	e, err := contract.MembershipChanged(granted, contract.Membership{Org: org, Account: m.account, Role: m.role, User: user}, key, c.Timestamp)
+	e, err := contract.MembershipChanged(granted, contract.Membership{Org: org, Account: m.account, Role: m.role, User: a.user(m.user)}, key, c.Timestamp)
 	if err != nil {
 		return err
 	}
@@ -175,19 +167,13 @@ func (a *Adapter) publishChange(ctx context.Context, org string, c Change) error
 	return nil
 }
 
-func (a *Adapter) storeID(ctx context.Context, org string) (string, error) {
-	if id, ok := a.storeIDs[org]; ok {
-		return id, nil
+// user labels the user from a tuple with the claim Platform Mesh uses. Invites
+// are always written with the email, also when the claim is sub.
+func (a *Adapter) user(value string) contract.User {
+	if a.UserClaim == "sub" && !strings.Contains(value, "@") {
+		return contract.User{Sub: value}
 	}
-	ids, err := a.FGA.StoreIDs(ctx)
-	if err != nil {
-		return "", err
-	}
-	a.storeIDs = ids
-	if id, ok := ids[org]; ok {
-		return id, nil
-	}
-	return "", fmt.Errorf("no OpenFGA store for org %s", org)
+	return contract.User{Email: value}
 }
 
 func (a *Adapter) loadState(ctx context.Context) (*corev1.ConfigMap, map[string]orgState, error) {

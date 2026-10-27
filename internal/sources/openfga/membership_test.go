@@ -20,7 +20,7 @@ func TestParseMembership(t *testing.T) {
 
 	got, ok := parseMembership(change("user:alice@example.com", "assignee", "role:core_platform-mesh_io_account/32epcrhea5sv5v5b/team-a/member"))
 	assert.True(t, ok)
-	assert.Equal(t, membership{account: "team-a", role: "member", email: "alice@example.com"}, got)
+	assert.Equal(t, membership{account: "team-a", role: "member", user: "alice@example.com"}, got)
 
 	for _, c := range []Change{
 		// The second tuple iam-service writes: the role on the account.

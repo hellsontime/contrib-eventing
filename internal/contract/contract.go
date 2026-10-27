@@ -25,11 +25,12 @@ const (
 	OrgExtension = "pmorg"
 )
 
-// User identifies a person. ID is the OIDC subject in the org's realm; Email
-// is only set when there is no ID yet (an invited user who never logged in).
+// User identifies a person by the claim Platform Mesh is configured with:
+// Email, or Sub (the OIDC subject in the org's realm). Invited users who never
+// logged in have no Sub yet and always come with Email.
 type User struct {
-	ID    string `json:"id,omitempty"`
 	Email string `json:"email,omitempty"`
+	Sub   string `json:"sub,omitempty"`
 }
 
 type Membership struct {

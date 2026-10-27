@@ -37,35 +37,35 @@ func (c *SubscriptionControllerConfig) AddFlags(fs *pflag.FlagSet) {
 }
 
 type OpenFGAAdapterConfig struct {
-	OpenFGAURL       string
-	KeycloakURL      string
-	KeycloakClientID string
-	// KeycloakClientSecret is read from the environment, not from a flag.
-	KeycloakClientSecret string
-	IngressURL           string
-	TokenFile            string
-	Interval             time.Duration
+	OpenFGAURL string
+	// UserClaim is the claim Platform Mesh identifies users by, the same as
+	// security-operator's --user-claim.
+	UserClaim string
+	// SkipStores are OpenFGA stores that do not belong to an org.
+	SkipStores []string
+	IngressURL string
+	TokenFile  string
+	Interval   time.Duration
 	// Namespace holds the adapter's state ConfigMap.
 	Namespace string
 }
 
 func NewOpenFGAAdapterConfig() OpenFGAAdapterConfig {
 	return OpenFGAAdapterConfig{
-		OpenFGAURL:           "http://openfga.platform-mesh-system.svc.cluster.local:8080",
-		KeycloakURL:          "http://keycloak-service.platform-mesh-system.svc.cluster.local:8080/keycloak",
-		KeycloakClientID:     "contrib-eventing",
-		KeycloakClientSecret: os.Getenv("KEYCLOAK_CLIENT_SECRET"),
-		IngressURL:           "http://ingress.contrib-eventing.svc.cluster.local",
-		TokenFile:            "/var/run/secrets/contrib-eventing/token",
-		Interval:             5 * time.Second,
-		Namespace:            os.Getenv("POD_NAMESPACE"),
+		OpenFGAURL: "http://openfga.platform-mesh-system.svc.cluster.local:8080",
+		UserClaim:  "email",
+		SkipStores: []string{"orgs"},
+		IngressURL: "http://ingress.contrib-eventing.svc.cluster.local",
+		TokenFile:  "/var/run/secrets/contrib-eventing/token",
+		Interval:   5 * time.Second,
+		Namespace:  os.Getenv("POD_NAMESPACE"),
 	}
 }
 
 func (c *OpenFGAAdapterConfig) AddFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.OpenFGAURL, "openfga-url", c.OpenFGAURL, "OpenFGA HTTP API")
-	fs.StringVar(&c.KeycloakURL, "keycloak-url", c.KeycloakURL, "Keycloak base URL")
-	fs.StringVar(&c.KeycloakClientID, "keycloak-client-id", c.KeycloakClientID, "service account client in the Keycloak master realm; the secret comes from KEYCLOAK_CLIENT_SECRET")
+	fs.StringVar(&c.UserClaim, "user-claim", c.UserClaim, "claim users are identified by, email or sub; use the same as security-operator")
+	fs.StringSliceVar(&c.SkipStores, "skip-stores", c.SkipStores, "OpenFGA stores that do not belong to an org")
 	fs.StringVar(&c.IngressURL, "ingress-url", c.IngressURL, "where to send events")
 	fs.StringVar(&c.TokenFile, "token-file", c.TokenFile, "ServiceAccount token the ingress accepts")
 	fs.DurationVar(&c.Interval, "interval", c.Interval, "how often to read the changelog")
