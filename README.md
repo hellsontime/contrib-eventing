@@ -18,7 +18,7 @@ OpenFGA can't send events, so the adapter reads its changelog and turns a change
 
 Later more systems get adapters (Keycloak, kcp), and providers will be able to send their own events too.
 
-More detail: [architecture](docs/architecture.md), [event contract](docs/contract.md), [decisions](docs/adr/).
+More detail: [architecture](docs/architecture.md), [event contract](docs/contract.md), [receiving events](docs/subscribing.md), [decisions](docs/adr/).
 
 ## What it does not do
 
