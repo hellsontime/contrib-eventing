@@ -13,6 +13,7 @@ import (
 	"fmt"
 
 	"github.com/platform-mesh/contrib-eventing/api/v1alpha1"
+	"github.com/platform-mesh/contrib-eventing/internal/contract"
 	"github.com/platform-mesh/contrib-eventing/internal/delivery"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -78,16 +79,16 @@ func (b *Backend) ensureBroker(ctx context.Context) error {
 	return nil
 }
 
-// triggerSpec translates a Subscription into a Trigger spec. The filter keeps
-// events whose type is any of the listed types.
+// triggerSpec translates a Subscription into a Trigger spec. Knative delivers
+// an event only if every filter matches: one for the types, one for the orgs.
 func triggerSpec(sub *v1alpha1.Subscription) map[string]any {
-	anyOf := make([]any, 0, len(sub.Spec.Filter.Types))
-	for _, t := range sub.Spec.Filter.Types {
-		anyOf = append(anyOf, map[string]any{"exact": map[string]any{"type": t}})
+	filters := []any{anyOf("type", sub.Spec.Filter.Types)}
+	if len(sub.Spec.Filter.Orgs) > 0 {
+		filters = append(filters, anyOf(contract.OrgExtension, sub.Spec.Filter.Orgs))
 	}
 	spec := map[string]any{
 		"broker":     BrokerName,
-		"filters":    []any{map[string]any{"any": anyOf}},
+		"filters":    filters,
 		"subscriber": map[string]any{"uri": sub.Spec.Sink.URI},
 	}
 	if d := sub.Spec.Delivery; d != nil {
@@ -104,6 +105,15 @@ func triggerSpec(sub *v1alpha1.Subscription) map[string]any {
 		spec["delivery"] = delivery
 	}
 	return spec
+}
+
+// anyOf matches events whose attribute has one of the values.
+func anyOf(attribute string, values []string) map[string]any {
+	exact := make([]any, 0, len(values))
+	for _, v := range values {
+		exact = append(exact, map[string]any{"exact": map[string]any{attribute: v}})
+	}
+	return map[string]any{"any": exact}
 }
 
 // readiness reads the Trigger's Ready condition. Knative folds the Broker's

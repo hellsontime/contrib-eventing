@@ -16,11 +16,13 @@ type SubscriptionSpec struct {
 	Delivery *Delivery `json:"delivery,omitempty"`
 }
 
-// Filter selects events by CloudEvents type. An event matches if its type is
-// one of the listed types.
+// Filter selects events. An event matches if its type is one of Types and, if
+// Orgs is set, its org (the pmorg extension) is one of Orgs.
 type Filter struct {
 	// +kubebuilder:validation:MinItems=1
 	Types []string `json:"types"`
+	// +optional
+	Orgs []string `json:"orgs,omitempty"`
 }
 
 // Sink is where matching events are sent, as CloudEvents over HTTP.

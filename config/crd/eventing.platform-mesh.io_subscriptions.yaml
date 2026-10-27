@@ -70,9 +70,13 @@ spec:
                 type: object
               filter:
                 description: |-
-                  Filter selects events by CloudEvents type. An event matches if its type is
-                  one of the listed types.
+                  Filter selects events. An event matches if its type is one of Types and, if
+                  Orgs is set, its org (the pmorg extension) is one of Orgs.
                 properties:
+                  orgs:
+                    items:
+                      type: string
+                    type: array
                   types:
                     items:
                       type: string

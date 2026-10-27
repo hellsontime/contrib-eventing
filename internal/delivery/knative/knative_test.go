@@ -30,3 +30,14 @@ func TestTriggerSpec(t *testing.T) {
 		"delivery":   map[string]any{"retry": int64(3)},
 	}, triggerSpec(sub))
 }
+
+func TestTriggerSpecWithOrgs(t *testing.T) {
+	sub := &v1alpha1.Subscription{Spec: v1alpha1.SubscriptionSpec{
+		Filter: v1alpha1.Filter{Types: []string{"a"}, Orgs: []string{"acme"}},
+		Sink:   v1alpha1.Sink{URI: "http://sink"},
+	}}
+	assert.Equal(t, []any{
+		map[string]any{"any": []any{map[string]any{"exact": map[string]any{"type": "a"}}}},
+		map[string]any{"any": []any{map[string]any{"exact": map[string]any{"pmorg": "acme"}}}},
+	}, triggerSpec(sub)["filters"])
+}
