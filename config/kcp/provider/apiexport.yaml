@@ -9,7 +9,7 @@ spec:
   resources:
     - group: eventing.platform-mesh.io
       name: subscriptions
-      schema: v261023-be9929d.subscriptions.eventing.platform-mesh.io
+      schema: v261027-5f51fd9.subscriptions.eventing.platform-mesh.io
       storage:
         crd: {}
   permissionClaims:

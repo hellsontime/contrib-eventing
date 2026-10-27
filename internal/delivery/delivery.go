@@ -13,13 +13,13 @@ import (
 	"github.com/platform-mesh/contrib-eventing/api/v1alpha1"
 )
 
-// Backend delivers the events of one org to the sinks of its Subscriptions.
+// Backend delivers events to the sinks of the Subscriptions.
 type Backend interface {
 	// Ensure sets up delivery for a Subscription. name is unique per
 	// Subscription across all workspaces.
-	Ensure(ctx context.Context, org, name string, sub *v1alpha1.Subscription) (Status, error)
+	Ensure(ctx context.Context, name string, sub *v1alpha1.Subscription) (Status, error)
 	// Delete stops delivery for a Subscription.
-	Delete(ctx context.Context, org, name string) error
+	Delete(ctx context.Context, name string) error
 }
 
 // Status is the delivery state of one Subscription.

@@ -29,7 +29,6 @@ import (
 
 	"github.com/kcp-dev/multicluster-provider/apiexport"
 	kcpapisv1alpha1 "github.com/kcp-dev/sdk/apis/apis/v1alpha1"
-	kcpcorev1alpha1 "github.com/kcp-dev/sdk/apis/core/v1alpha1"
 )
 
 var subscriptionControllerCfg = config.NewSubscriptionControllerConfig()
@@ -52,7 +51,6 @@ func runSubscriptionController(_ *cobra.Command, _ []string) { // coverage-ignor
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(v1alpha1.AddToScheme(scheme))
-	utilruntime.Must(kcpcorev1alpha1.AddToScheme(scheme))
 	// The apiexport provider reads the APIExportEndpointSlice with this scheme.
 	utilruntime.Must(kcpapisv1alpha1.AddToScheme(scheme))
 
@@ -96,7 +94,7 @@ func runSubscriptionController(_ *cobra.Command, _ []string) { // coverage-ignor
 	if err != nil {
 		log.Fatal().Err(err).Msg("unable to create client for the local cluster")
 	}
-	r := &subscription.Reconciler{Manager: mgr, Delivery: &knative.Backend{Client: localClient}}
+	r := &subscription.Reconciler{Manager: mgr, Delivery: &knative.Backend{Client: localClient, Namespace: subscriptionControllerCfg.BrokerNamespace}}
 	if err := r.SetupWithManager(mgr); err != nil {
 		log.Fatal().Err(err).Msg("unable to create controller")
 	}

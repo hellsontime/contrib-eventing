@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v261023-be9929d.subscriptions.eventing.platform-mesh.io
+  name: v261027-5f51fd9.subscriptions.eventing.platform-mesh.io
 spec:
   group: eventing.platform-mesh.io
   names:
@@ -12,9 +12,6 @@ spec:
   scope: Cluster
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .status.org
-      name: Org
-      type: string
     - jsonPath: .status.conditions[?(@.type=="Ready")].status
       name: Ready
       type: string
@@ -23,8 +20,9 @@ spec:
       type: string
     name: v1alpha1
     schema:
-      description: Subscription delivers events of the organization it lives in to
-        a sink.
+      description: |-
+        Subscription delivers events of the whole platform to a sink. Platform
+        admins create them in the eventing workspace.
       properties:
         apiVersion:
           description: |-
@@ -154,9 +152,6 @@ spec:
             observedGeneration:
               format: int64
               type: integer
-            org:
-              description: Org is the organization the Subscription belongs to.
-              type: string
           type: object
       required:
       - spec

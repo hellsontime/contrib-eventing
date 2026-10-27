@@ -18,18 +18,22 @@ import (
 type SubscriptionControllerConfig struct {
 	KCPKubeconfig          string
 	APIExportEndpointSlice string
+	// BrokerNamespace holds the Knative Broker and the Triggers.
+	BrokerNamespace string
 }
 
 func NewSubscriptionControllerConfig() SubscriptionControllerConfig {
 	return SubscriptionControllerConfig{
 		KCPKubeconfig:          "/kcp/kubeconfig",
 		APIExportEndpointSlice: "eventing.platform-mesh.io",
+		BrokerNamespace:        os.Getenv("POD_NAMESPACE"),
 	}
 }
 
 func (c *SubscriptionControllerConfig) AddFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.KCPKubeconfig, "kcp-kubeconfig", c.KCPKubeconfig, "kubeconfig for the provider workspace in kcp")
 	fs.StringVar(&c.APIExportEndpointSlice, "apiexport-endpointslice", c.APIExportEndpointSlice, "APIExportEndpointSlice to watch Subscriptions through")
+	fs.StringVar(&c.BrokerNamespace, "broker-namespace", c.BrokerNamespace, "namespace of the Knative Broker and Triggers (default from POD_NAMESPACE)")
 }
 
 type OpenFGAAdapterConfig struct {

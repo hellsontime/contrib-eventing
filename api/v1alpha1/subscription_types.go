@@ -46,18 +46,15 @@ type Delivery struct {
 type SubscriptionStatus struct {
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
-	// Org is the organization the Subscription belongs to.
-	// +optional
-	Org string `json:"org,omitempty"`
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
-// Subscription delivers events of the organization it lives in to a sink.
+// Subscription delivers events of the whole platform to a sink. Platform
+// admins create them in the eventing workspace.
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:scope=Cluster
 // +kubebuilder:subresource:status
-// +kubebuilder:printcolumn:name="Org",type=string,JSONPath=`.status.org`
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 // +kubebuilder:printcolumn:name="Reason",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].reason`
 type Subscription struct {

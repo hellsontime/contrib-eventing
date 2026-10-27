@@ -3,8 +3,8 @@ Copyright The Platform Mesh Authors.
 SPDX-License-Identifier: Apache-2.0
 */
 
-// Package knative delivers events with Knative Eventing: one Broker per
-// organization, one Trigger per Subscription. Knative objects are handled as
+// Package knative delivers events with Knative Eventing: one Broker for the
+// platform, one Trigger per Subscription. Knative objects are handled as
 // unstructured so we don't depend on Knative's Go modules.
 package knative
 
@@ -14,9 +14,7 @@ import (
 
 	"github.com/platform-mesh/contrib-eventing/api/v1alpha1"
 	"github.com/platform-mesh/contrib-eventing/internal/delivery"
-	"github.com/platform-mesh/contrib-eventing/internal/orgs"
 
-	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -24,68 +22,58 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
-const brokerName = "default"
+// BrokerName is the name of the one Broker.
+const BrokerName = "default"
 
 var (
 	brokerGVK  = schema.GroupVersionKind{Group: "eventing.knative.dev", Version: "v1", Kind: "Broker"}
 	triggerGVK = schema.GroupVersionKind{Group: "eventing.knative.dev", Version: "v1", Kind: "Trigger"}
 )
 
-// Backend implements delivery.Backend.
+// Backend implements delivery.Backend with one Broker for the whole platform.
 type Backend struct {
 	Client ctrlruntimeclient.Client
+	// Namespace holds the Broker and the Triggers.
+	Namespace string
 }
 
-// Ensure makes sure the organization has a Broker and the Subscription has a
-// Trigger, and reports whether the Trigger is ready.
-func (b *Backend) Ensure(ctx context.Context, org, trigger string, sub *v1alpha1.Subscription) (delivery.Status, error) {
-	ns := orgs.Namespace(org)
-	if err := b.ensureBroker(ctx, org, ns); err != nil {
+// Ensure makes sure the Broker exists and the Subscription has a Trigger, and
+// reports whether the Trigger is ready.
+func (b *Backend) Ensure(ctx context.Context, trigger string, sub *v1alpha1.Subscription) (delivery.Status, error) {
+	if err := b.ensureBroker(ctx); err != nil {
 		return delivery.Status{}, err
 	}
 
 	t := &unstructured.Unstructured{}
 	t.SetGroupVersionKind(triggerGVK)
-	t.SetNamespace(ns)
+	t.SetNamespace(b.Namespace)
 	t.SetName(trigger)
 	_, err := controllerutil.CreateOrUpdate(ctx, b.Client, t, func() error {
 		t.SetAnnotations(map[string]string{"eventing.platform-mesh.io/subscription": sub.Name})
 		return unstructured.SetNestedMap(t.Object, triggerSpec(sub), "spec")
 	})
 	if err != nil {
-		return delivery.Status{}, fmt.Errorf("trigger %s/%s: %w", ns, trigger, err)
+		return delivery.Status{}, fmt.Errorf("trigger %s/%s: %w", b.Namespace, trigger, err)
 	}
 	return readiness(t), nil
 }
 
 // Delete removes the Subscription's Trigger. The Broker stays.
-func (b *Backend) Delete(ctx context.Context, org, trigger string) error {
+func (b *Backend) Delete(ctx context.Context, trigger string) error {
 	t := &unstructured.Unstructured{}
 	t.SetGroupVersionKind(triggerGVK)
-	t.SetNamespace(orgs.Namespace(org))
+	t.SetNamespace(b.Namespace)
 	t.SetName(trigger)
 	return ctrlruntimeclient.IgnoreNotFound(b.Client.Delete(ctx, t))
 }
 
-func (b *Backend) ensureBroker(ctx context.Context, org, ns string) error {
-	n := &corev1.Namespace{}
-	n.Name = ns
-	if _, err := controllerutil.CreateOrUpdate(ctx, b.Client, n, func() error {
-		if n.Labels == nil {
-			n.Labels = map[string]string{}
-		}
-		n.Labels[orgs.Label] = org
-		return nil
-	}); err != nil {
-		return fmt.Errorf("namespace %s: %w", ns, err)
-	}
-
+func (b *Backend) ensureBroker(ctx context.Context) error {
 	br := &unstructured.Unstructured{}
 	br.SetGroupVersionKind(brokerGVK)
-	br.SetNamespace(ns)
-	br.SetName(brokerName)
+	br.SetNamespace(b.Namespace)
+	br.SetName(BrokerName)
 	if err := b.Client.Create(ctx, br); err != nil && !apierrors.IsAlreadyExists(err) {
-		return fmt.Errorf("broker %s/%s: %w", ns, brokerName, err)
+		return fmt.Errorf("broker %s/%s: %w", b.Namespace, BrokerName, err)
 	}
 	return nil
 }
@@ -98,7 +86,7 @@ func triggerSpec(sub *v1alpha1.Subscription) map[string]any {
 		anyOf = append(anyOf, map[string]any{"exact": map[string]any{"type": t}})
 	}
 	spec := map[string]any{
-		"broker":     brokerName,
+		"broker":     BrokerName,
 		"filters":    []any{map[string]any{"any": anyOf}},
 		"subscriber": map[string]any{"uri": sub.Spec.Sink.URI},
 	}
