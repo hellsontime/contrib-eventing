@@ -78,13 +78,16 @@ type IngressConfig struct {
 	// Publishers may send events for any org.
 	Publishers    []string
 	BrokerIngress string
+	// BrokerNamespace holds the Knative Broker.
+	BrokerNamespace string
 }
 
 func NewIngressConfig() IngressConfig {
 	return IngressConfig{
-		ListenAddress: ":8080",
-		Audience:      "contrib-eventing",
-		BrokerIngress: "http://broker-ingress.knative-eventing.svc.cluster.local",
+		ListenAddress:   ":8080",
+		Audience:        "contrib-eventing",
+		BrokerIngress:   "http://broker-ingress.knative-eventing.svc.cluster.local",
+		BrokerNamespace: os.Getenv("POD_NAMESPACE"),
 	}
 }
 
@@ -93,4 +96,5 @@ func (c *IngressConfig) AddFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.Audience, "audience", c.Audience, "audience publishers' tokens must be issued for")
 	fs.StringSliceVar(&c.Publishers, "publishers", c.Publishers, "users that may publish for any org")
 	fs.StringVar(&c.BrokerIngress, "broker-ingress", c.BrokerIngress, "Knative broker ingress")
+	fs.StringVar(&c.BrokerNamespace, "broker-namespace", c.BrokerNamespace, "namespace of the Knative Broker (default from POD_NAMESPACE)")
 }

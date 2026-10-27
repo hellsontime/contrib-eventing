@@ -16,8 +16,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/platform-mesh/contrib-eventing/internal/config"
+	"github.com/platform-mesh/contrib-eventing/internal/delivery/knative"
 	"github.com/platform-mesh/contrib-eventing/internal/ingress"
-	"github.com/platform-mesh/contrib-eventing/internal/orgs"
 	"github.com/platform-mesh/contrib-eventing/internal/publish"
 	pmcontext "go.platform-mesh.io/golang-commons/context"
 
@@ -53,13 +53,13 @@ func runIngress(_ *cobra.Command, _ []string) { // coverage-ignore
 	}
 
 	pub := &publish.Publisher{Client: &http.Client{Timeout: 10 * time.Second}}
+	broker := fmt.Sprintf("%s/%s/%s", cfg.BrokerIngress, cfg.BrokerNamespace, knative.BrokerName)
 	h := &ingress.Handler{
 		Auth:       &ingress.TokenReviewer{Kube: kube, Audience: cfg.Audience},
 		Publishers: cfg.Publishers,
-		Kube:       kube,
 		Log:        log,
-		Forward: func(ctx context.Context, org string, e cloudevents.Event) error {
-			return pub.Publish(ctx, fmt.Sprintf("%s/%s/default", cfg.BrokerIngress, orgs.Namespace(org)), e)
+		Forward: func(ctx context.Context, e cloudevents.Event) error {
+			return pub.Publish(ctx, broker, e)
 		},
 	}
 	srv := &http.Server{Addr: cfg.ListenAddress, Handler: h, ReadHeaderTimeout: 10 * time.Second}
@@ -67,7 +67,7 @@ func runIngress(_ *cobra.Command, _ []string) { // coverage-ignore
 		<-ctx.Done()
 		_ = srv.Shutdown(context.Background())
 	}()
-	log.Info().Str("address", cfg.ListenAddress).Strs("publishers", cfg.Publishers).Msg("listening")
+	log.Info().Str("address", cfg.ListenAddress).Str("broker", broker).Strs("publishers", cfg.Publishers).Msg("listening")
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal().Err(err).Msg("ingress stopped")
 	}

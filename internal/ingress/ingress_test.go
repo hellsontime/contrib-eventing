@@ -17,9 +17,6 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"go.platform-mesh.io/golang-commons/logger/testlogger"
-
-	corev1 "k8s.io/api/core/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 type fakeAuth map[string]string
@@ -32,16 +29,13 @@ func (f fakeAuth) Authenticate(_ context.Context, token string) (string, error) 
 }
 
 func TestHandler(t *testing.T) {
-	broker := &corev1.Namespace{}
-	broker.Name = "pm-events-acme"
 	var forwarded []string
 	h := &Handler{
 		Auth:       fakeAuth{"adapter": "system:serviceaccount:contrib-eventing:openfga-adapter", "other": "system:serviceaccount:default:x"},
 		Publishers: []string{"system:serviceaccount:contrib-eventing:openfga-adapter"},
-		Kube:       fake.NewClientBuilder().WithObjects(broker).Build(),
 		Log:        testlogger.New().HideLogOutput().Logger,
-		Forward: func(_ context.Context, org string, _ cloudevents.Event) error {
-			forwarded = append(forwarded, org)
+		Forward: func(_ context.Context, e cloudevents.Event) error {
+			forwarded = append(forwarded, e.Extensions()["pmorg"].(string))
 			return nil
 		},
 	}
@@ -54,7 +48,6 @@ func TestHandler(t *testing.T) {
 		{"unknown token", "forged", "acme", http.StatusUnauthorized},
 		{"not a publisher", "other", "acme", http.StatusForbidden},
 		{"no org", "adapter", "", http.StatusBadRequest},
-		{"org without subscriptions", "adapter", "nobody", http.StatusAccepted},
 		{"accepted", "adapter", "acme", http.StatusAccepted},
 	} {
 		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("{}"))
