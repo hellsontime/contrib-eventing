@@ -12,7 +12,7 @@ flowchart LR
     subs[Subscription controller]
     kn[Knative Broker and Triggers]
   end
-  subgraph Org[Org workspace in kcp]
+  subgraph Admin[Platform admin]
     sub[Subscription]
   end
   fga --> ing
@@ -26,7 +26,7 @@ flowchart LR
 | --- | --- | --- |
 | OpenFGA adapter | Reads the OpenFGA changelog and turns membership changes into events | us |
 | Ingress | Checks who is sending and that the event belongs to that sender's org, then hands it on | us |
-| Subscription API | A kcp resource in the org workspace: event types, target URL, retry settings | us |
+| Subscription API | Created by a platform admin: event types, target URL, retry settings | us |
 | Subscription controller | Turns each Subscription into a Knative Trigger and reports status back | us |
 | Delivery | Fan-out, filtering by type, retries, dead letters | Knative Eventing |
 
@@ -37,20 +37,21 @@ Example: Alice is made a member of account `team-a` in org `acme`.
 1. Someone adds Alice in the portal, and iam-service writes a role tuple to OpenFGA. Nothing in that path knows about eventing.
 2. The OpenFGA adapter polls the changelog of the `acme` store, sees the new tuple, and builds a `membership.granted` event ([contract](contract.md)).
 3. The adapter posts the event to the ingress. The ingress checks the adapter's identity and forwards the event to the broker of `acme`.
-4. A Subscription in `acme` asked for membership events. Its Trigger matches, and Knative sends the event to the subscriber's URL.
+4. A Subscription asked for membership events. Its Trigger matches, and Knative sends the event to the subscriber's URL.
 5. If the subscriber does not answer with success, Knative retries with backoff. After the last attempt the event goes to a dead letter sink, if one is set.
 
 ## Tenancy
 
-Each org is isolated. An org gets its own broker, and a Subscription only ever receives events of its own org. Subscriptions live in the org workspace, so who may create them is controlled by normal kcp permissions.
+Subscriptions are for platform admins. A Subscription receives the events of all orgs, and every event carries its org (`pmorg`), so a Subscription can filter by it.
 
-Account-level and installation-wide subscriptions are not in the first milestone.
+Org-level and account-level subscriptions are not in the first milestone.
 
 ## How it plugs in
 
 The module does not change Platform Mesh components. It needs:
 
-- an APIExport for the Subscription API that orgs bind to;
+- the Subscription API for platform admins;
+- the ingress exposed through the Gateway API;
 - read access to the OpenFGA changelog;
 - Knative Eventing installed in the cluster.
 
@@ -68,4 +69,3 @@ These came out of the [spike](https://github.com/platform-mesh/backlog/issues/42
 
 - The Knative broker ingress accepts any event from inside the cluster, which is why our own ingress sits in front of it.
 - Subscriptions accept any URL. Targets should be limited by an allowlist that the platform operator controls.
-- Mapping a kcp workspace to its org name used admin access in the spike and needs a proper permission.

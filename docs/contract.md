@@ -29,7 +29,7 @@ Sent when a user gets or loses a role on an account.
     "org": "acme",
     "account": "team-a",
     "role": "member",
-    "user": { "id": "3f2b9c1e-7d41-4a8e-9b0e-2c5d8f6a1b77" }
+    "user": { "id": "alice@example.com" }
   }
 }
 ```
@@ -52,10 +52,7 @@ Sent when a user gets or loses a role on an account.
 | `org` | yes | org name |
 | `account` | yes | account name |
 | `role` | yes | Platform Mesh role, for example `owner` or `member` |
-| `user.id` | if known | the user's OIDC subject (`sub`), stable across email changes |
-| `user.email` | only without `user.id` | set for invited users who have not logged in yet and therefore have no `sub` |
-
-At least one of `user.id` and `user.email` is always present.
+| `user.id` | yes | the user as Platform Mesh identifies them: the value of the user claim the platform admin configured, `email` by default. Invited users who have not logged in yet are identified the same way. |
 
 ## What subscribers should expect
 
@@ -69,7 +66,7 @@ At least one of `user.id` and `user.email` is always present.
 
 - Is a stream of changes enough, or do subscribers also need a full snapshot of an account's members to resync?
 - Is the role list fixed, or can adopters define their own roles?
-- Accounts can be nested. Is the account name enough, or do we need the path or a stable id?
+- Accounts can be nested, so the account name alone is not unique within an org. `subject` will carry a stable account id; its format is still open.
 
 ## Versioning
 

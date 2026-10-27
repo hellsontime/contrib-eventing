@@ -11,10 +11,10 @@ flowchart LR
   fga[OpenFGA] -- changelog --> adapter[OpenFGA adapter]
   adapter -- event --> delivery[Delivery]
   delivery -- event --> sink[Your endpoint]
-  subs[Subscription in kcp] -. what goes where .-> delivery
+  subs[Subscription] -. what goes where .-> delivery
 ```
 
-OpenFGA can't send events, so the adapter reads its changelog and turns a change like "Alice became member of team-a" into an event. You create a Subscription in your org's kcp workspace (which events, which URL), and delivery sends matching events there, with retries.
+OpenFGA can't send events, so the adapter reads its changelog and turns a change like "Alice became member of team-a" into an event. A platform admin creates a Subscription (which events, which URL), and delivery sends matching events from all orgs there, with retries.
 
 Later more systems get adapters (Keycloak, kcp), and providers will be able to send their own events too.
 
@@ -28,7 +28,7 @@ More detail: [architecture](docs/architecture.md), [event contract](docs/contrac
 ## First milestone
 
 - Membership events (a user gets or loses a role on an account), read from OpenFGA.
-- Subscriptions per org.
+- Subscriptions for platform admins, covering all orgs.
 
 ## Background
 
