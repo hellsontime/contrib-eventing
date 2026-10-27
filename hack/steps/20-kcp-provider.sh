@@ -1,5 +1,5 @@
-# Registers the eventing API in kcp: a provider workspace that exports it, and
-# a policy that lets organizations bind it.
+# Registers the eventing API in kcp: a provider workspace that exports it and
+# binds it itself. Platform admins create their Subscriptions in there.
 
 log "Registering eventing.platform-mesh.io in kcp"
 kcp root:providers apply -f - >/dev/null <<EOF
@@ -18,4 +18,16 @@ kcp root:providers:eventing apply -f "$ROOT/config/kcp/provider" >/dev/null
 # kcp creates an endpoint slice for the export; the controller watches through it.
 wait_for "APIExportEndpointSlice" 60 \
   kcp root:providers:eventing get apiexportendpointslice eventing.platform-mesh.io
-kcp root:orgs apply -f "$ROOT/config/kcp/orgs" >/dev/null
+
+kcp root:providers:eventing apply -f - >/dev/null <<EOF
+apiVersion: apis.kcp.io/v1alpha2
+kind: APIBinding
+metadata:
+  name: eventing.platform-mesh.io
+spec:
+  reference:
+    export:
+      name: eventing.platform-mesh.io
+      path: root:providers:eventing
+EOF
+kcp root:providers:eventing wait --for=condition=Ready apibinding/eventing.platform-mesh.io --timeout=60s >/dev/null

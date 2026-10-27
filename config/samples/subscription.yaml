@@ -1,4 +1,4 @@
-# Applied into the organization workspace.
+# Applied into root:providers:eventing by a platform admin.
 apiVersion: eventing.platform-mesh.io/v1alpha1
 kind: Subscription
 metadata:
