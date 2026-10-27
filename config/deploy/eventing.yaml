@@ -17,54 +17,25 @@ metadata:
   name: ingress
   namespace: contrib-eventing
 ---
-# The controller creates one namespace with a Broker per org, and Triggers.
+# The controller manages the one Broker and a Trigger per Subscription.
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
+kind: Role
 metadata:
-  name: contrib-eventing-subscription-controller
+  name: subscription-controller
+  namespace: contrib-eventing
 rules:
-  - apiGroups: [""]
-    resources: [namespaces]
-    verbs: [get, list, watch, create, update, patch]
   - apiGroups: [eventing.knative.dev]
     resources: [brokers, triggers]
     verbs: [get, list, watch, create, update, patch, delete]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
+kind: RoleBinding
 metadata:
-  name: contrib-eventing-subscription-controller
-roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: contrib-eventing-subscription-controller}
+  name: subscription-controller
+  namespace: contrib-eventing
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: subscription-controller}
 subjects:
   - {kind: ServiceAccount, name: subscription-controller, namespace: contrib-eventing}
----
-# The adapter and the ingress find subscribed orgs by their broker namespace.
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: contrib-eventing-read-namespaces
-rules:
-  - apiGroups: [""]
-    resources: [namespaces]
-    verbs: [get, list]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: contrib-eventing-read-namespaces
-roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: contrib-eventing-read-namespaces}
-subjects:
-  - {kind: ServiceAccount, name: openfga-adapter, namespace: contrib-eventing}
-  - {kind: ServiceAccount, name: ingress, namespace: contrib-eventing}
----
-# The ingress checks publishers' tokens with TokenReviews.
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: contrib-eventing-ingress-auth-delegator
-roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: system:auth-delegator}
-subjects:
-  - {kind: ServiceAccount, name: ingress, namespace: contrib-eventing}
 ---
 # The adapter keeps its place in the changelog in a ConfigMap.
 apiVersion: rbac.authorization.k8s.io/v1
@@ -85,6 +56,15 @@ metadata:
 roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: openfga-adapter}
 subjects:
   - {kind: ServiceAccount, name: openfga-adapter, namespace: contrib-eventing}
+---
+# The ingress checks publishers' tokens with TokenReviews.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: contrib-eventing-ingress-auth-delegator
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: system:auth-delegator}
+subjects:
+  - {kind: ServiceAccount, name: ingress, namespace: contrib-eventing}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -111,6 +91,9 @@ spec:
           image: ${IMAGE}
           imagePullPolicy: Never
           args: [subscription-controller, --kcp-kubeconfig=/kcp/kubeconfig]
+          env:
+            - name: POD_NAMESPACE
+              valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
           readinessProbe:
             httpGet: {path: /readyz, port: 8090}
           volumeMounts:
@@ -143,12 +126,10 @@ spec:
         - name: adapter
           image: ${IMAGE}
           imagePullPolicy: Never
-          args: [openfga-adapter]
+          args: [openfga-adapter, --user-claim=${USER_CLAIM}]
           env:
             - name: POD_NAMESPACE
               valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
-            - name: KEYCLOAK_CLIENT_SECRET
-              valueFrom: {secretKeyRef: {name: contrib-eventing-keycloak, key: client-secret}}
           volumeMounts:
             - {name: token, mountPath: /var/run/secrets/contrib-eventing, readOnly: true}
           securityContext:
@@ -183,6 +164,9 @@ spec:
           args:
             - ingress
             - --publishers=system:serviceaccount:contrib-eventing:openfga-adapter
+          env:
+            - name: POD_NAMESPACE
+              valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
           ports:
             - containerPort: 8080
           securityContext:
@@ -201,8 +185,28 @@ spec:
     - port: 80
       targetPort: 8080
 ---
+# Makes the ingress reachable from outside the cluster through the platform's
+# Gateway. The terminate-services listener takes routes from any namespace for
+# hosts below services.<domain>.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: ingress
+  namespace: contrib-eventing
+spec:
+  parentRefs:
+    - name: k8sapi-gateway
+      namespace: platform-mesh-system
+      sectionName: terminate-services
+  hostnames: [eventing.services.${BASE_DOMAIN}]
+  rules:
+    - backendRefs:
+        - name: ingress
+          port: 80
+---
 # Knative's broker ingress accepts any event that reaches it. Only our ingress,
-# and Knative itself for reply events, may reach it.
+# and Knative itself for reply events, may reach it. That ingress is shared by
+# every Broker in the cluster, so Knative must be used by eventing only.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
