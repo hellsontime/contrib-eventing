@@ -1,0 +1,35 @@
+# A sink that logs every CloudEvent it receives.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: eventing-demo-sink
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: event-display
+  namespace: eventing-demo-sink
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: event-display}
+  template:
+    metadata:
+      labels: {app: event-display}
+    spec:
+      containers:
+        - name: event-display
+          image: gcr.io/knative-releases/knative.dev/eventing/cmd/event_display:v1.23.1@sha256:434f1ada8e9f9337dc4855959a02a5209b17d03477b376a402869ee03f99c78a
+          ports:
+            - containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: event-display
+  namespace: eventing-demo-sink
+spec:
+  selector: {app: event-display}
+  ports:
+    - port: 80
+      targetPort: 8080

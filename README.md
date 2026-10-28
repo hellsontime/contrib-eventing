@@ -14,11 +14,11 @@ flowchart LR
   subs[Subscription in kcp] -. what goes where .-> delivery
 ```
 
-OpenFGA can't send events, so the adapter reads its changelog and turns a change like "Alice became member of team-a" into an event. You create a Subscription in your org's kcp workspace (which events, which URL), and delivery sends matching events there, with retries.
+OpenFGA can't send events, so the adapter reads its changelog and turns a change like "Alice became member of team-a" into an event. A platform admin creates a Subscription in the eventing workspace in kcp (which events, which URL), and delivery sends matching events there, with retries. There is one stream for the whole platform; every event names the org it belongs to.
 
 Later more systems get adapters (Keycloak, kcp), and providers will be able to send their own events too.
 
-More detail: [architecture](docs/architecture.md), [event contract](docs/contract.md), [decisions](docs/adr/).
+More detail: [architecture](docs/architecture.md), [event contract](docs/contract.md), [receiving events](docs/subscribing.md), [decisions](docs/adr/).
 
 ## What it does not do
 
@@ -28,7 +28,25 @@ More detail: [architecture](docs/architecture.md), [event contract](docs/contrac
 ## First milestone
 
 - Membership events (a user gets or loses a role on an account), read from OpenFGA.
-- Subscriptions per org.
+- Subscriptions for platform admins, covering all orgs.
+
+What comes after is in the [roadmap](docs/roadmap.md).
+
+## Try it locally
+
+You need a local Platform Mesh on kind, installed as described in
+[helm-charts/installation](https://github.com/platform-mesh/helm-charts/tree/main/installation),
+and `kubectl`, `docker`, `curl` and `jq`. Knative in that cluster must be used by eventing only (see [architecture](docs/architecture.md#how-it-plugs-in)).
+
+```sh
+./hack/install.sh     # adds eventing, a subscribed sink and a demo org eventing-demo
+./hack/add-member.sh  # gives a user the member role on the demo org
+kubectl -n eventing-demo-sink logs deploy/event-display
+```
+
+The sink shows a `membership.granted` event. `./hack/add-member.sh --remove`
+takes the role away again, `./test/e2e.sh` checks the whole path and
+`./hack/uninstall.sh` removes everything.
 
 ## Background
 

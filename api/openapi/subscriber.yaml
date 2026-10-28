@@ -1,0 +1,194 @@
+openapi: 3.1.0
+info:
+  title: Platform Mesh eventing subscriber endpoint
+  version: v1alpha1
+  summary: What an endpoint named in a Subscription receives and must answer.
+  description: |
+    Eventing POSTs one CloudEvent per request to the `sink.uri` of a
+    Subscription, in CloudEvents HTTP binary mode: the attributes are `ce-*`
+    headers, the event data is the JSON body. See docs/contract.md for the
+    meaning of the fields.
+
+    Answer with a 2xx status and an empty body, quickly. A non-empty body that
+    is not a CloudEvent counts as a failed delivery. A body that is a
+    CloudEvent is taken as a reply and published again, so never send one.
+
+    Delivery is at least once and unordered: drop events whose `ce-id` you have
+    already seen.
+  license:
+    name: Apache 2.0
+    identifier: Apache-2.0
+# The endpoint is yours; this is where the Subscription points.
+servers:
+  - url: '{sinkUri}'
+    variables:
+      sinkUri:
+        default: http://my-consumer.my-namespace.svc.cluster.local
+        description: The Subscription's sink.uri, reachable from inside the cluster.
+# Requests come without credentials.
+security: []
+webhooks:
+  membershipGranted:
+    post:
+      operationId: membershipGranted
+      summary: A user got a role on an account.
+      parameters:
+        - $ref: '#/components/parameters/ceSpecversion'
+        - $ref: '#/components/parameters/ceId'
+        - $ref: '#/components/parameters/ceSource'
+        - name: ce-type
+          in: header
+          required: true
+          schema:
+            const: io.platform-mesh.iam.membership.granted.v1alpha1
+        - $ref: '#/components/parameters/ceSubject'
+        - $ref: '#/components/parameters/ceTime'
+        - $ref: '#/components/parameters/cePmorg'
+      requestBody:
+        $ref: '#/components/requestBodies/Membership'
+      responses:
+        '2XX':
+          $ref: '#/components/responses/Delivered'
+        '404':
+          $ref: '#/components/responses/Retried'
+        '408':
+          $ref: '#/components/responses/Retried'
+        '409':
+          $ref: '#/components/responses/Retried'
+        '429':
+          $ref: '#/components/responses/Retried'
+        '5XX':
+          $ref: '#/components/responses/Retried'
+        default:
+          $ref: '#/components/responses/Failed'
+  membershipRevoked:
+    post:
+      operationId: membershipRevoked
+      summary: A user lost a role on an account.
+      parameters:
+        - $ref: '#/components/parameters/ceSpecversion'
+        - $ref: '#/components/parameters/ceId'
+        - $ref: '#/components/parameters/ceSource'
+        - name: ce-type
+          in: header
+          required: true
+          schema:
+            const: io.platform-mesh.iam.membership.revoked.v1alpha1
+        - $ref: '#/components/parameters/ceSubject'
+        - $ref: '#/components/parameters/ceTime'
+        - $ref: '#/components/parameters/cePmorg'
+      requestBody:
+        $ref: '#/components/requestBodies/Membership'
+      responses:
+        '2XX':
+          $ref: '#/components/responses/Delivered'
+        '404':
+          $ref: '#/components/responses/Retried'
+        '408':
+          $ref: '#/components/responses/Retried'
+        '409':
+          $ref: '#/components/responses/Retried'
+        '429':
+          $ref: '#/components/responses/Retried'
+        '5XX':
+          $ref: '#/components/responses/Retried'
+        default:
+          $ref: '#/components/responses/Failed'
+components:
+  parameters:
+    ceSpecversion:
+      name: ce-specversion
+      in: header
+      required: true
+      schema:
+        const: '1.0'
+    ceId:
+      name: ce-id
+      in: header
+      required: true
+      description: Unique per change and the same on every redelivery. Use it to drop duplicates; do not parse it.
+      schema:
+        type: string
+      example: 3d95f792518d1253545ad05aa72c9044
+    ceSource:
+      name: ce-source
+      in: header
+      required: true
+      schema:
+        type: string
+        pattern: ^platform-mesh\.io/orgs/[^/]+/iam$
+      example: platform-mesh.io/orgs/acme/iam
+    ceSubject:
+      name: ce-subject
+      in: header
+      required: true
+      schema:
+        type: string
+        pattern: ^accounts/.+$
+      example: accounts/team-a
+    ceTime:
+      name: ce-time
+      in: header
+      required: true
+      description: When the change happened.
+      schema:
+        type: string
+        format: date-time
+    cePmorg:
+      name: ce-pmorg
+      in: header
+      required: true
+      description: The org the event belongs to.
+      schema:
+        type: string
+      example: acme
+  requestBodies:
+    Membership:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Membership'
+          example:
+            org: acme
+            account: team-a
+            role: member
+            user:
+              email: alice@example.com
+  responses:
+    Delivered:
+      description: Delivered. The body must be empty.
+    Retried:
+      description: Failed for now; delivered again with backoff, up to the Subscription's retry count.
+    Failed:
+      description: Any other status is a failed delivery and is not retried.
+  schemas:
+    Membership:
+      type: object
+      required: [org, account, role, user]
+      properties:
+        org:
+          type: string
+          description: Org name.
+        account:
+          type: string
+          description: Account name. Nested accounts can share a name.
+        role:
+          type: string
+          description: Platform Mesh role, for example owner or member.
+        user:
+          $ref: '#/components/schemas/User'
+    User:
+      type: object
+      description: |
+        The user under the claim the platform identifies users by (security-operator
+        --user-claim). Invited users who never logged in always come with email.
+      minProperties: 1
+      maxProperties: 1
+      properties:
+        email:
+          type: string
+          format: email
+        sub:
+          type: string
+          description: OIDC subject in the org's realm.

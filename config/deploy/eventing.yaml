@@ -1,0 +1,231 @@
+# Deployed by hack/steps/60-deploy.sh, which fills in the ${...} values.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: subscription-controller
+  namespace: contrib-eventing
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: openfga-adapter
+  namespace: contrib-eventing
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ingress
+  namespace: contrib-eventing
+---
+# The controller manages the one Broker and a Trigger per Subscription.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: subscription-controller
+  namespace: contrib-eventing
+rules:
+  - apiGroups: [eventing.knative.dev]
+    resources: [brokers, triggers]
+    verbs: [get, list, watch, create, update, patch, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: subscription-controller
+  namespace: contrib-eventing
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: subscription-controller}
+subjects:
+  - {kind: ServiceAccount, name: subscription-controller, namespace: contrib-eventing}
+---
+# The adapter keeps its place in the changelog in a ConfigMap.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: openfga-adapter
+  namespace: contrib-eventing
+rules:
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [get, create, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: openfga-adapter
+  namespace: contrib-eventing
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: openfga-adapter}
+subjects:
+  - {kind: ServiceAccount, name: openfga-adapter, namespace: contrib-eventing}
+---
+# The ingress checks publishers' tokens with TokenReviews.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: contrib-eventing-ingress-auth-delegator
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: system:auth-delegator}
+subjects:
+  - {kind: ServiceAccount, name: ingress, namespace: contrib-eventing}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: subscription-controller
+  namespace: contrib-eventing
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: subscription-controller}
+  template:
+    metadata:
+      labels: {app: subscription-controller}
+    spec:
+      serviceAccountName: subscription-controller
+      # kcp hands out virtual workspace URLs with the public host names. Inside
+      # the cluster they have to resolve to Traefik, like for the Platform Mesh
+      # components themselves.
+      hostAliases:
+        - ip: ${TRAEFIK_IP}
+          hostnames: [kcp.api.${BASE_DOMAIN}, root.kcp.${BASE_DOMAIN}]
+      containers:
+        - name: controller
+          image: ${IMAGE}
+          imagePullPolicy: Never
+          args: [subscription-controller, --kcp-kubeconfig=/kcp/kubeconfig]
+          env:
+            - name: POD_NAMESPACE
+              valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
+          readinessProbe:
+            httpGet: {path: /readyz, port: 8090}
+          volumeMounts:
+            # The whole Secret, because the kubeconfig reads the rotating token
+            # from the file next to it.
+            - {name: kcp, mountPath: /kcp, readOnly: true}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+            runAsNonRoot: true
+      volumes:
+        - name: kcp
+          secret: {secretName: contrib-eventing-kcp}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openfga-adapter
+  namespace: contrib-eventing
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: openfga-adapter}
+  template:
+    metadata:
+      labels: {app: openfga-adapter}
+    spec:
+      serviceAccountName: openfga-adapter
+      containers:
+        - name: adapter
+          image: ${IMAGE}
+          imagePullPolicy: Never
+          args: [openfga-adapter, --user-claim=${USER_CLAIM}]
+          env:
+            - name: POD_NAMESPACE
+              valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
+          volumeMounts:
+            - {name: token, mountPath: /var/run/secrets/contrib-eventing, readOnly: true}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+            runAsNonRoot: true
+      volumes:
+        # A token only the ingress accepts.
+        - name: token
+          projected:
+            sources:
+              - serviceAccountToken: {path: token, audience: contrib-eventing, expirationSeconds: 3600}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ingress
+  namespace: contrib-eventing
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: ingress}
+  template:
+    metadata:
+      labels: {app: ingress}
+    spec:
+      serviceAccountName: ingress
+      containers:
+        - name: ingress
+          image: ${IMAGE}
+          imagePullPolicy: Never
+          args:
+            - ingress
+            - --publishers=system:serviceaccount:contrib-eventing:openfga-adapter
+          env:
+            - name: POD_NAMESPACE
+              valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
+          ports:
+            - containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+            runAsNonRoot: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ingress
+  namespace: contrib-eventing
+spec:
+  selector: {app: ingress}
+  ports:
+    - port: 80
+      targetPort: 8080
+---
+# Makes the ingress reachable from outside the cluster through the platform's
+# Gateway. The terminate-services listener takes routes from any namespace for
+# hosts below services.<domain>.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: ingress
+  namespace: contrib-eventing
+spec:
+  parentRefs:
+    - name: k8sapi-gateway
+      namespace: platform-mesh-system
+      sectionName: terminate-services
+  hostnames: [eventing.services.${BASE_DOMAIN}]
+  rules:
+    - backendRefs:
+        - name: ingress
+          port: 80
+---
+# Knative's broker ingress accepts any event that reaches it. Only our ingress,
+# and Knative itself for reply events, may reach it. That ingress is shared by
+# every Broker in the cluster, so Knative must be used by eventing only.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: contrib-eventing-broker-ingress
+  namespace: knative-eventing
+spec:
+  podSelector:
+    matchLabels:
+      eventing.knative.dev/brokerRole: ingress
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: contrib-eventing}
+          podSelector:
+            matchLabels: {app: ingress}
+        # TODO: this rule lets replies through, and a reply can be any event a
+        # sink makes up, so it reaches subscribers without passing our ingress.
+        # Dropping the rule blocks replies (tested, e2e passes); Knative OIDC
+        # with an EventPolicy would reject them properly. See docs/roadmap.md.
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: knative-eventing}

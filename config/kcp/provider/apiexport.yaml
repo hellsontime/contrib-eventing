@@ -1,0 +1,14 @@
+# Applied into root:providers:eventing, which also binds it. There is no
+# APIExportPolicy, so org workspaces cannot bind it: Subscriptions are for
+# platform admins.
+apiVersion: apis.kcp.io/v1alpha2
+kind: APIExport
+metadata:
+  name: eventing.platform-mesh.io
+spec:
+  resources:
+    - group: eventing.platform-mesh.io
+      name: subscriptions
+      schema: v261027-8bf9c70.subscriptions.eventing.platform-mesh.io
+      storage:
+        crd: {}

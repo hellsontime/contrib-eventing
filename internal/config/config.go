@@ -1,0 +1,100 @@
+/*
+Copyright The Platform Mesh Authors.
+SPDX-License-Identifier: Apache-2.0
+*/
+
+// Package config holds the settings of each component. The settings every
+// Platform Mesh component shares (logging, health probes, shutdown) come
+// from golang-commons.
+package config
+
+import (
+	"os"
+	"time"
+
+	"github.com/spf13/pflag"
+)
+
+type SubscriptionControllerConfig struct {
+	KCPKubeconfig          string
+	APIExportEndpointSlice string
+	// BrokerNamespace holds the Knative Broker and the Triggers.
+	BrokerNamespace string
+}
+
+func NewSubscriptionControllerConfig() SubscriptionControllerConfig {
+	return SubscriptionControllerConfig{
+		KCPKubeconfig:          "/kcp/kubeconfig",
+		APIExportEndpointSlice: "eventing.platform-mesh.io",
+		BrokerNamespace:        os.Getenv("POD_NAMESPACE"),
+	}
+}
+
+func (c *SubscriptionControllerConfig) AddFlags(fs *pflag.FlagSet) {
+	fs.StringVar(&c.KCPKubeconfig, "kcp-kubeconfig", c.KCPKubeconfig, "kubeconfig for the provider workspace in kcp")
+	fs.StringVar(&c.APIExportEndpointSlice, "apiexport-endpointslice", c.APIExportEndpointSlice, "APIExportEndpointSlice to watch Subscriptions through")
+	fs.StringVar(&c.BrokerNamespace, "broker-namespace", c.BrokerNamespace, "namespace of the Knative Broker and Triggers (default from POD_NAMESPACE)")
+}
+
+type OpenFGAAdapterConfig struct {
+	OpenFGAURL string
+	// UserClaim is the claim Platform Mesh identifies users by, the same as
+	// security-operator's --user-claim.
+	UserClaim string
+	// SkipStores are OpenFGA stores that do not belong to an org.
+	SkipStores []string
+	IngressURL string
+	TokenFile  string
+	Interval   time.Duration
+	// Namespace holds the adapter's state ConfigMap.
+	Namespace string
+}
+
+func NewOpenFGAAdapterConfig() OpenFGAAdapterConfig {
+	return OpenFGAAdapterConfig{
+		OpenFGAURL: "http://openfga.platform-mesh-system.svc.cluster.local:8080",
+		UserClaim:  "email",
+		SkipStores: []string{"orgs"},
+		IngressURL: "http://ingress.contrib-eventing.svc.cluster.local",
+		TokenFile:  "/var/run/secrets/contrib-eventing/token",
+		Interval:   5 * time.Second,
+		Namespace:  os.Getenv("POD_NAMESPACE"),
+	}
+}
+
+func (c *OpenFGAAdapterConfig) AddFlags(fs *pflag.FlagSet) {
+	fs.StringVar(&c.OpenFGAURL, "openfga-url", c.OpenFGAURL, "OpenFGA HTTP API")
+	fs.StringVar(&c.UserClaim, "user-claim", c.UserClaim, "claim users are identified by, email or sub; use the same as security-operator")
+	fs.StringSliceVar(&c.SkipStores, "skip-stores", c.SkipStores, "OpenFGA stores that do not belong to an org")
+	fs.StringVar(&c.IngressURL, "ingress-url", c.IngressURL, "where to send events")
+	fs.StringVar(&c.TokenFile, "token-file", c.TokenFile, "ServiceAccount token the ingress accepts")
+	fs.DurationVar(&c.Interval, "interval", c.Interval, "how often to read the changelog")
+	fs.StringVar(&c.Namespace, "namespace", c.Namespace, "namespace of the state ConfigMap (default from POD_NAMESPACE)")
+}
+
+type IngressConfig struct {
+	ListenAddress string
+	Audience      string
+	// Publishers may send events for any org.
+	Publishers    []string
+	BrokerIngress string
+	// BrokerNamespace holds the Knative Broker.
+	BrokerNamespace string
+}
+
+func NewIngressConfig() IngressConfig {
+	return IngressConfig{
+		ListenAddress:   ":8080",
+		Audience:        "contrib-eventing",
+		BrokerIngress:   "http://broker-ingress.knative-eventing.svc.cluster.local",
+		BrokerNamespace: os.Getenv("POD_NAMESPACE"),
+	}
+}
+
+func (c *IngressConfig) AddFlags(fs *pflag.FlagSet) {
+	fs.StringVar(&c.ListenAddress, "listen-address", c.ListenAddress, "address to accept events on")
+	fs.StringVar(&c.Audience, "audience", c.Audience, "audience publishers' tokens must be issued for")
+	fs.StringSliceVar(&c.Publishers, "publishers", c.Publishers, "users that may publish for any org")
+	fs.StringVar(&c.BrokerIngress, "broker-ingress", c.BrokerIngress, "Knative broker ingress")
+	fs.StringVar(&c.BrokerNamespace, "broker-namespace", c.BrokerNamespace, "namespace of the Knative Broker (default from POD_NAMESPACE)")
+}

@@ -18,10 +18,10 @@ This ADR fixes the scope and shape of the first milestone so implementation can 
 
 1. **Separate, optional module.** Eventing lives in this repository and changes no existing Platform Mesh component. It observes the system from outside, following [RFC 008](https://github.com/platform-mesh/architecture/blob/main/rfc/008-platform-mesh-modularization.md).
 2. **Sources.** Components that can emit events publish them directly. An adapter exists only for systems that cannot. In the first milestone that is OpenFGA, read through its changelog API, which sees every write regardless of who made it.
-3. **Subscriptions in kcp.** Consumers declare a `Subscription` in their org workspace. Only org-level subscriptions in the first milestone.
+3. **Subscriptions in kcp, for platform admins.** Platform admins declare a `Subscription` in the eventing workspace; one stream covers all orgs, and each event names its org. Org-level subscriptions are not in the first milestone.
 4. **Delivery through Knative, hidden behind our API.** Fan-out, filtering, retries and dead letters come from Knative Broker and Trigger. Consumers never create Knative objects, so the backend can be replaced later.
-5. **Own ingress.** All events enter through an ingress that authenticates the sender before they reach the broker. Subscription targets are limited by an allowlist that the platform operator controls.
-6. **One engine-neutral contract.** Events are CloudEvents with the types and fields in the [contract](../contract.md). Users are identified by their OIDC subject. No OpenFGA identifiers appear in events.
+5. **Own ingress.** All events enter through an ingress that authenticates the sender before they reach the broker. It is reachable through the platform's Gateway API. Subscription targets are limited by an allowlist that the platform operator controls.
+6. **One engine-neutral contract.** Events are CloudEvents with the types and fields in the [contract](../contract.md). Users are identified by the user claim the platform admin configured (`email` by default). No OpenFGA identifiers appear in events.
 7. **First milestone scope.** Membership events from OpenFGA and a publish path for providers. Keycloak events (login, user created) come later.
 
 ## Considered Options
@@ -65,7 +65,8 @@ Because Knative stays behind our API, moving to B or C later changes nothing for
 
 - Do consumers need snapshots in addition to changes?
 - Which durable broker class is the default for production?
-- How does the module map a kcp workspace to its org name without admin access?
+- ~~How does the module map a kcp workspace to its org name without admin access?~~
+  A permission claim on `logicalclusters` gives the controller the workspace path.
 
 ## References
 

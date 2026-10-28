@@ -29,7 +29,7 @@ Sent when a user gets or loses a role on an account.
     "org": "acme",
     "account": "team-a",
     "role": "member",
-    "user": { "id": "3f2b9c1e-7d41-4a8e-9b0e-2c5d8f6a1b77" }
+    "user": { "email": "alice@example.com" }
   }
 }
 ```
@@ -52,10 +52,10 @@ Sent when a user gets or loses a role on an account.
 | `org` | yes | org name |
 | `account` | yes | account name |
 | `role` | yes | Platform Mesh role, for example `owner` or `member` |
-| `user.id` | if known | the user's OIDC subject (`sub`), stable across email changes |
-| `user.email` | only without `user.id` | set for invited users who have not logged in yet and therefore have no `sub` |
+| `user.email` | with the `email` claim, and for invited users | the user's email |
+| `user.sub` | with the `sub` claim | the user's OIDC subject in the org's realm; the same person has a different `sub` in another org |
 
-At least one of `user.id` and `user.email` is always present.
+Users are identified the way the platform admin configured Platform Mesh: by the user claim security-operator uses (`--user-claim`, `email` by default). The event carries that value under the claim's name. Invited users who never logged in have no `sub` yet and always appear with `user.email`.
 
 ## What subscribers should expect
 
@@ -63,13 +63,14 @@ At least one of `user.id` and `user.email` is always present.
 - **No ordering.** A role change arrives as a revoke of the old role and a grant of the new one, in either order.
 - **Account deletion** shows up as one revoke per member. There is no separate event for it yet.
 - **Org deletion** produces no membership events.
+- **Nothing from before eventing was installed.** Older changes are not replayed. Orgs created later are covered from their first change.
 - **Account creation** shows up as an owner grant for the creator.
 
 ## Open questions
 
 - Is a stream of changes enough, or do subscribers also need a full snapshot of an account's members to resync?
 - Is the role list fixed, or can adopters define their own roles?
-- Accounts can be nested. Is the account name enough, or do we need the path or a stable id?
+- Accounts can be nested, and names are only unique below their parent: `acme:a:team-x` and `acme:b:team-x` both appear as `accounts/team-x`. Do we need the path or a stable id?
 
 ## Versioning
 
