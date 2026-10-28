@@ -16,6 +16,7 @@ import (
 	"github.com/platform-mesh/contrib-eventing/internal/contract"
 	"github.com/platform-mesh/contrib-eventing/internal/delivery"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	ctrlruntimeclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -81,16 +82,8 @@ func (b *Backend) ensureBroker(ctx context.Context) error {
 	br.SetGroupVersionKind(brokerGVK)
 	br.SetNamespace(b.Namespace)
 	br.SetName(BrokerName)
-	_, err := controllerutil.CreateOrUpdate(ctx, b.Client, br, func() error {
-		annotations := br.GetAnnotations()
-		if annotations == nil {
-			annotations = map[string]string{}
-		}
-		annotations[asyncHandlerAnnotation] = "true"
-		br.SetAnnotations(annotations)
-		return nil
-	})
-	if err != nil {
+	br.SetAnnotations(map[string]string{asyncHandlerAnnotation: "true"})
+	if err := b.Client.Create(ctx, br); err != nil && !apierrors.IsAlreadyExists(err) {
 		return fmt.Errorf("broker %s/%s: %w", b.Namespace, BrokerName, err)
 	}
 	return nil
