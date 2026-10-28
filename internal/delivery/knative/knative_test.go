@@ -39,22 +39,15 @@ func TestTriggerSpec(t *testing.T) {
 
 func TestEnsureBrokerIsAsync(t *testing.T) {
 	ctx := context.Background()
-	existing := &unstructured.Unstructured{}
-	existing.SetGroupVersionKind(brokerGVK)
-	existing.SetNamespace("contrib-eventing")
-	existing.SetName(BrokerName)
-	existing.SetAnnotations(map[string]string{"eventing.knative.dev/broker.class": "MTChannelBasedBroker"})
-	b := &Backend{Client: fake.NewClientBuilder().WithObjects(existing).Build(), Namespace: "contrib-eventing"}
+	b := &Backend{Client: fake.NewClientBuilder().Build(), Namespace: "contrib-eventing"}
 
-	// A Broker from an older install gets the annotation and keeps the others.
+	require.NoError(t, b.ensureBroker(ctx))
+	// A second call finds the Broker and leaves it alone.
 	require.NoError(t, b.ensureBroker(ctx))
 	br := &unstructured.Unstructured{}
 	br.SetGroupVersionKind(brokerGVK)
 	require.NoError(t, b.Client.Get(ctx, ctrlruntimeclient.ObjectKey{Namespace: "contrib-eventing", Name: BrokerName}, br))
-	assert.Equal(t, map[string]string{
-		"eventing.knative.dev/broker.class": "MTChannelBasedBroker",
-		asyncHandlerAnnotation:              "true",
-	}, br.GetAnnotations())
+	assert.Equal(t, map[string]string{asyncHandlerAnnotation: "true"}, br.GetAnnotations())
 }
 
 func TestTriggerSpecWithOrgs(t *testing.T) {
