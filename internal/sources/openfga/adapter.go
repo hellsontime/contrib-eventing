@@ -13,7 +13,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
-	"strings"
 	"time"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
@@ -36,9 +35,6 @@ const (
 // gives each org a store named like the org.
 type Adapter struct {
 	FGA *Client
-	// UserClaim is the claim Platform Mesh identifies users by ("email" or
-	// "sub"); tuples hold the user under that claim.
-	UserClaim string
 	// SkipStores are stores that do not belong to an org.
 	SkipStores []string
 	Kube       ctrlruntimeclient.Client
@@ -158,7 +154,13 @@ func (a *Adapter) publishChange(ctx context.Context, org string, c Change) error
 	}
 	granted := c.Operation == opWrite
 	key := fmt.Sprintf("openfga/%s/%s/%s/%s/%s", c.Operation, c.TupleKey.User, c.TupleKey.Relation, c.TupleKey.Object, c.Timestamp.Format(time.RFC3339Nano))
-	e, err := contract.MembershipChanged(granted, contract.Membership{Org: org, Account: m.account, Role: m.role, User: a.user(m.user)}, key, c.Timestamp)
+	e, err := contract.MembershipChanged(granted, contract.Membership{
+		Org:       org,
+		Account:   m.account,
+		AccountID: contract.AccountID(m.cluster, m.account),
+		Role:      m.role,
+		User:      contract.User{ID: m.user},
+	}, key, c.Timestamp)
 	if err != nil {
 		return err
 	}
@@ -167,15 +169,6 @@ func (a *Adapter) publishChange(ctx context.Context, org string, c Change) error
 	}
 	a.Log.Info().Str("org", org).Str("type", e.Type()).Str("id", e.ID()).Msg("published")
 	return nil
-}
-
-// user labels the user from a tuple with the claim Platform Mesh uses. Invites
-// are always written with the email, also when the claim is sub.
-func (a *Adapter) user(value string) contract.User {
-	if a.UserClaim == "sub" && !strings.Contains(value, "@") {
-		return contract.User{Sub: value}
-	}
-	return contract.User{Email: value}
 }
 
 func (a *Adapter) loadState(ctx context.Context) (*corev1.ConfigMap, map[string]orgState, error) {

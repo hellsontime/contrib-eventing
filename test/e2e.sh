@@ -14,7 +14,7 @@ sink_logs() { kind_kubectl -n eventing-demo-sink logs deploy/event-display; }
 count() { sink_logs | grep -c "type: io.platform-mesh.iam.membership.$1" || true; }
 more_than() { (($(count "$1") > $2)); }
 # The last event of a type, as event-display prints it.
-last_event() { sink_logs | grep -A22 "type: io.platform-mesh.iam.membership.$1" | tail -23; }
+last_event() { sink_logs | grep -A23 "type: io.platform-mesh.iam.membership.$1" | tail -24; }
 add_member() { "$ROOT/hack/add-member.sh" "$@" >/dev/null; }
 subscription_ready() { [[ $(admin get subscription $sub -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}') == True ]]; }
 
@@ -22,6 +22,8 @@ log "The platform admin's Subscription is ready"
 subscription_ready && pass "Ready in root:providers:eventing" || fail "Subscription not ready"
 
 log "A new member is announced"
+# The org account lives in root:orgs, so its id starts with that cluster.
+account_id=$(kcp "root:orgs:$ORG" get accountinfo account -o jsonpath='{.spec.organization.originClusterId}')/$ORG
 # Start from a known state: the demo user is not a member yet.
 add_member --remove "$DEMO_USER" member
 sleep 10
@@ -30,17 +32,18 @@ add_member "$DEMO_USER" member
 wait_for "membership.granted at the sink" 30 more_than granted "$before"
 event=$(last_event granted)
 grep -q "source: platform-mesh.io/orgs/$ORG/iam" <<<"$event" && pass "source" || fail "source missing"
-grep -q "subject: accounts/$ORG" <<<"$event" && pass "subject" || fail "subject missing"
+grep -q "subject: accounts/$account_id" <<<"$event" && pass "subject" || fail "subject missing"
+grep -q "\"accountId\": \"$account_id\"" <<<"$event" && pass "accountId" || fail "accountId missing"
 grep -q "pmorg: $ORG" <<<"$event" && pass "pmorg" || fail "pmorg missing"
 grep -q '"role": "member"' <<<"$event" && pass "role" || fail "role missing"
-grep -q "\"email\": \"$DEMO_USER\"" <<<"$event" && pass "user by the configured claim (email)" || fail "user missing"
+grep -q "\"id\": \"$DEMO_USER\"" <<<"$event" && pass "user.id by the configured claim (email)" || fail "user missing"
 
-log "An invited user is announced by email"
+log "An invited user is announced the same way"
 invited=invited-$RANDOM@example.com
 before=$(count granted)
 add_member "$invited" member
 wait_for "membership.granted for the invited user" 30 more_than granted "$before"
-grep -q "\"email\": \"$invited\"" <<<"$(last_event granted)" && pass "user.email=$invited" || fail "email missing"
+grep -q "\"id\": \"$invited\"" <<<"$(last_event granted)" && pass "user.id=$invited" || fail "user id missing"
 before=$(count revoked)
 add_member --remove "$invited" member
 wait_for "membership.revoked for the invited user" 30 more_than revoked "$before"
@@ -49,7 +52,7 @@ log "Removing the role is announced"
 before=$(count revoked)
 add_member --remove "$DEMO_USER" member
 wait_for "membership.revoked at the sink" 30 more_than revoked "$before"
-grep -q "\"email\": \"$DEMO_USER\"" <<<"$(last_event revoked)" && pass "membership.revoked" || fail "revoked event wrong"
+grep -q "\"id\": \"$DEMO_USER\"" <<<"$(last_event revoked)" && pass "membership.revoked" || fail "revoked event wrong"
 
 log "Restarting the adapter does not publish again"
 total=$(($(count granted) + $(count revoked)))
@@ -73,6 +76,37 @@ kcp root:orgs wait --for=condition=Ready "account/$neworg" --timeout=300s >/dev/
 wait_for "the owner grant of $neworg" 60 more_than granted "$before"
 grep -q "pmorg: $neworg" <<<"$(last_event granted)" && pass "owner grant of $neworg" || fail "no event for $neworg"
 kcp root:orgs delete account "$neworg" --wait=false >/dev/null
+
+log "Accounts with the same name have different ids"
+# Only events after this point count; earlier runs used the same account names.
+seen=$(sink_logs | wc -l)
+# Created as the demo user, who becomes owner; the owner grant is the event.
+kcp "root:orgs:$ORG" apply --as "$DEMO_USER" -f - >/dev/null <<EOF
+apiVersion: core.platform-mesh.io/v1alpha1
+kind: Account
+metadata:
+  name: e2e-account
+spec:
+  type: account
+EOF
+kcp "root:orgs:$ORG" wait --for=condition=Ready account/e2e-account --timeout=180s >/dev/null
+kcp "root:orgs:$ORG:e2e-account" apply --as "$DEMO_USER" -f - >/dev/null <<EOF
+apiVersion: core.platform-mesh.io/v1alpha1
+kind: Account
+metadata:
+  name: e2e-account
+spec:
+  type: account
+EOF
+kcp "root:orgs:$ORG:e2e-account" wait --for=condition=Ready account/e2e-account --timeout=180s >/dev/null
+# Each account's owner grant names the workspace that holds the Account.
+outer=$(kcp "root:orgs:$ORG" get accountinfo account -o jsonpath='{.spec.account.generatedClusterId}')/e2e-account
+inner=$(kcp "root:orgs:$ORG:e2e-account" get accountinfo account -o jsonpath='{.spec.account.generatedClusterId}')/e2e-account
+announced() { grep -q "subject: accounts/$1" <<<"$(sink_logs | tail -n +$((seen + 1)))"; }
+wait_for "owner grant for the outer account" 30 announced "$outer" && pass "subject accounts/$outer"
+wait_for "owner grant for the inner account" 30 announced "$inner" && pass "subject accounts/$inner"
+kcp "root:orgs:$ORG:e2e-account" delete account e2e-account --wait=false >/dev/null
+kcp "root:orgs:$ORG" delete account e2e-account --wait=false >/dev/null
 
 log "A Subscription limited to other orgs gets nothing"
 admin patch subscription $sub --type merge -p '{"spec":{"filter":{"orgs":["someone-else"]}}}' >/dev/null

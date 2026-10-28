@@ -126,7 +126,7 @@ spec:
         - name: adapter
           image: ${IMAGE}
           imagePullPolicy: Never
-          args: [openfga-adapter, --user-claim=${USER_CLAIM}]
+          args: [openfga-adapter]
           env:
             - name: POD_NAMESPACE
               valueFrom: {fieldRef: {fieldPath: metadata.namespace}}

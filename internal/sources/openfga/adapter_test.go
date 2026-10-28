@@ -32,7 +32,7 @@ const twoChanges = `{"changes": [
   {"operation": "TUPLE_OPERATION_WRITE", "timestamp": "2026-10-23T13:43:24Z",
    "tuple_key": {"user": "user:alice@example.com", "relation": "assignee", "object": "role:core_platform-mesh_io_account/c1/team-a/member"}},
   {"operation": "TUPLE_OPERATION_DELETE", "timestamp": "2026-10-23T13:43:25Z",
-   "tuple_key": {"user": "user:new@example.com", "relation": "assignee", "object": "role:core_platform-mesh_io_account/c1/team-a/owner"}}
+   "tuple_key": {"user": "user:new@example.com", "relation": "assignee", "object": "role:core_platform-mesh_io_account/c2/team-a/owner"}}
 ], "continuation_token": "after-page"}`
 
 func TestPublishNew(t *testing.T) {
@@ -48,9 +48,8 @@ func TestPublishNew(t *testing.T) {
 	var published []cloudevents.Event
 	fail := true
 	a := &Adapter{
-		FGA:       &Client{BaseURL: srv.URL, HTTP: srv.Client()},
-		UserClaim: "email",
-		Log:       testlogger.New().HideLogOutput().Logger,
+		FGA: &Client{BaseURL: srv.URL, HTTP: srv.Client()},
+		Log: testlogger.New().HideLogOutput().Logger,
 		Publish: func(_ context.Context, e cloudevents.Event) error {
 			if fail && len(published) == 1 {
 				return errors.New("ingress down")
@@ -77,19 +76,14 @@ func TestPublishNew(t *testing.T) {
 	require.NoError(t, json.Unmarshal(published[0].Data(), &granted))
 	require.NoError(t, json.Unmarshal(published[1].Data(), &revoked))
 	assert.Equal(t, contract.TypeMembershipGranted, published[0].Type())
-	assert.Equal(t, contract.User{Email: "alice@example.com"}, granted.User)
+	assert.Equal(t, contract.User{ID: "alice@example.com"}, granted.User)
+	assert.Equal(t, "c1/team-a", granted.AccountID)
+	assert.Equal(t, "accounts/c1/team-a", published[0].Subject())
+	// Same name, other parent workspace: another account.
+	assert.Equal(t, contract.User{ID: "new@example.com"}, revoked.User)
+	assert.Equal(t, "accounts/c2/team-a", published[1].Subject())
 	assert.Equal(t, contract.TypeMembershipRevoked, published[1].Type())
 	assert.Equal(t, "owner", revoked.Role)
-}
-
-func TestUserClaim(t *testing.T) {
-	sub := &Adapter{UserClaim: "sub"}
-	assert.Equal(t, contract.User{Sub: "8107d41c"}, sub.user("8107d41c"))
-	// Invites are written with the email, also when the claim is sub.
-	assert.Equal(t, contract.User{Email: "new@example.com"}, sub.user("new@example.com"))
-
-	email := &Adapter{UserClaim: "email"}
-	assert.Equal(t, contract.User{Email: "alice@example.com"}, email.user("alice@example.com"))
 }
 
 // fakeFGA serves a list of stores and answers every changelog request with no
