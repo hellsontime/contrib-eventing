@@ -124,8 +124,8 @@ components:
       required: true
       schema:
         type: string
-        pattern: ^accounts/.+$
-      example: accounts/team-a
+        pattern: ^accounts/[^/]+/[^/]+$
+      example: accounts/a5zld11wopsu1uea/team-a
     ceTime:
       name: ce-time
       in: header
@@ -152,9 +152,10 @@ components:
           example:
             org: acme
             account: team-a
+            accountId: a5zld11wopsu1uea/team-a
             role: member
             user:
-              email: alice@example.com
+              id: alice@example.com
   responses:
     Delivered:
       description: Delivered. The body must be empty.
@@ -165,7 +166,7 @@ components:
   schemas:
     Membership:
       type: object
-      required: [org, account, role, user]
+      required: [org, account, accountId, role, user]
       properties:
         org:
           type: string
@@ -173,6 +174,11 @@ components:
         account:
           type: string
           description: Account name. Nested accounts can share a name.
+        accountId:
+          type: string
+          description: |
+            The account, unique in the platform: the logical cluster of the workspace that
+            holds the Account object and the account name (AccountInfo originClusterId/name).
         role:
           type: string
           description: Platform Mesh role, for example owner or member.
@@ -180,15 +186,11 @@ components:
           $ref: '#/components/schemas/User'
     User:
       type: object
-      description: |
-        The user under the claim the platform identifies users by (security-operator
-        --user-claim). Invited users who never logged in always come with email.
-      minProperties: 1
-      maxProperties: 1
+      required: [id]
       properties:
-        email:
+        id:
           type: string
-          format: email
-        sub:
-          type: string
-          description: OIDC subject in the org's realm.
+          description: |
+            The value Platform Mesh authorizes the user with: the claim the platform admin
+            configured (security-operator --user-claim), email by default. Invitations are
+            written with the email, also with the sub claim.

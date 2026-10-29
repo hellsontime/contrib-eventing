@@ -38,9 +38,6 @@ func (c *SubscriptionControllerConfig) AddFlags(fs *pflag.FlagSet) {
 
 type OpenFGAAdapterConfig struct {
 	OpenFGAURL string
-	// UserClaim is the claim Platform Mesh identifies users by, the same as
-	// security-operator's --user-claim.
-	UserClaim string
 	// SkipStores are OpenFGA stores that do not belong to an org.
 	SkipStores []string
 	IngressURL string
@@ -53,7 +50,6 @@ type OpenFGAAdapterConfig struct {
 func NewOpenFGAAdapterConfig() OpenFGAAdapterConfig {
 	return OpenFGAAdapterConfig{
 		OpenFGAURL: "http://openfga.platform-mesh-system.svc.cluster.local:8080",
-		UserClaim:  "email",
 		SkipStores: []string{"orgs"},
 		IngressURL: "http://ingress.contrib-eventing.svc.cluster.local",
 		TokenFile:  "/var/run/secrets/contrib-eventing/token",
@@ -64,7 +60,6 @@ func NewOpenFGAAdapterConfig() OpenFGAAdapterConfig {
 
 func (c *OpenFGAAdapterConfig) AddFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.OpenFGAURL, "openfga-url", c.OpenFGAURL, "OpenFGA HTTP API")
-	fs.StringVar(&c.UserClaim, "user-claim", c.UserClaim, "claim users are identified by, email or sub; use the same as security-operator")
 	fs.StringSliceVar(&c.SkipStores, "skip-stores", c.SkipStores, "OpenFGA stores that do not belong to an org")
 	fs.StringVar(&c.IngressURL, "ingress-url", c.IngressURL, "where to send events")
 	fs.StringVar(&c.TokenFile, "token-file", c.TokenFile, "ServiceAccount token the ingress accepts")

@@ -40,9 +40,6 @@ func runOpenFGAAdapter(_ *cobra.Command, _ []string) { // coverage-ignore
 	if cfg.Namespace == "" {
 		log.Fatal().Msg("POD_NAMESPACE or --namespace must be set")
 	}
-	if cfg.UserClaim != "email" && cfg.UserClaim != "sub" {
-		log.Fatal().Str("claim", cfg.UserClaim).Msg("--user-claim must be email or sub")
-	}
 	ctx, _, shutdown := pmcontext.StartContext(log, cfg, defaultCfg.ShutdownTimeout)
 	defer shutdown()
 
@@ -59,7 +56,6 @@ func runOpenFGAAdapter(_ *cobra.Command, _ []string) { // coverage-ignore
 	pub := &publish.Publisher{Client: httpClient, TokenFile: cfg.TokenFile}
 	a := &openfga.Adapter{
 		FGA:        &openfga.Client{BaseURL: cfg.OpenFGAURL, HTTP: httpClient},
-		UserClaim:  cfg.UserClaim,
 		SkipStores: cfg.SkipStores,
 		Kube:       kube,
 		Namespace:  cfg.Namespace,
@@ -69,7 +65,7 @@ func runOpenFGAAdapter(_ *cobra.Command, _ []string) { // coverage-ignore
 			return pub.Publish(ctx, cfg.IngressURL, e)
 		},
 	}
-	log.Info().Str("openfga", cfg.OpenFGAURL).Str("userClaim", cfg.UserClaim).Msg("starting adapter")
+	log.Info().Str("openfga", cfg.OpenFGAURL).Msg("starting adapter")
 	if err := a.Run(ctx); err != nil {
 		log.Fatal().Err(err).Msg("adapter stopped")
 	}

@@ -21,15 +21,16 @@ Sent when a user gets or loses a role on an account.
   "id": "25fdb262e1c7303601770040f01083d9",
   "source": "platform-mesh.io/orgs/acme/iam",
   "type": "io.platform-mesh.iam.membership.granted.v1alpha1",
-  "subject": "accounts/team-a",
+  "subject": "accounts/a5zld11wopsu1uea/team-a",
   "time": "2026-10-01T09:12:44Z",
   "pmorg": "acme",
   "datacontenttype": "application/json",
   "data": {
     "org": "acme",
     "account": "team-a",
+    "accountId": "a5zld11wopsu1uea/team-a",
     "role": "member",
-    "user": { "email": "alice@example.com" }
+    "user": { "id": "alice@example.com" }
   }
 }
 ```
@@ -41,7 +42,7 @@ Sent when a user gets or loses a role on an account.
 | `id` | Unique per change and the same on every redelivery. Use it to drop duplicates. Do not parse it. |
 | `source` | `platform-mesh.io/orgs/<org>/iam` |
 | `type` | one of the types above |
-| `subject` | `accounts/<account>` |
+| `subject` | `accounts/<accountId>` |
 | `time` | when the change happened |
 | `pmorg` | the org name, so subscribers can filter without reading `data` |
 
@@ -50,12 +51,12 @@ Sent when a user gets or loses a role on an account.
 | Field | Required | Meaning |
 | --- | --- | --- |
 | `org` | yes | org name |
-| `account` | yes | account name |
+| `account` | yes | account name. Nested accounts can share a name, so don't use it as a key. |
+| `accountId` | yes | the account, unique in the platform: the logical cluster of the workspace that holds the Account object, and the account name. It is the same pair the account's `AccountInfo` shows as `originClusterId` and `name`. |
 | `role` | yes | Platform Mesh role, for example `owner` or `member` |
-| `user.email` | with the `email` claim, and for invited users | the user's email |
-| `user.sub` | with the `sub` claim | the user's OIDC subject in the org's realm; the same person has a different `sub` in another org |
+| `user.id` | yes | the user as Platform Mesh identifies them, see below |
 
-Users are identified the way the platform admin configured Platform Mesh: by the user claim security-operator uses (`--user-claim`, `email` by default). The event carries that value under the claim's name. Invited users who never logged in have no `sub` yet and always appear with `user.email`.
+Users are identified the way the platform admin configured Platform Mesh: by the user claim security-operator uses (`--user-claim`, `email` by default). `user.id` is the value Platform Mesh authorizes the user with, so with the default it is the email. Invitations are always written with the email, so with the `sub` claim an invited user who never logged in appears with their email.
 
 ## What subscribers should expect
 
@@ -70,7 +71,6 @@ Users are identified the way the platform admin configured Platform Mesh: by the
 
 - Is a stream of changes enough, or do subscribers also need a full snapshot of an account's members to resync?
 - Is the role list fixed, or can adopters define their own roles?
-- Accounts can be nested, and names are only unique below their parent: `acme:a:team-x` and `acme:b:team-x` both appear as `accounts/team-x`. Do we need the path or a stable id?
 
 ## Versioning
 
