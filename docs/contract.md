@@ -53,6 +53,7 @@ Sent when a user gets or loses a role on an account.
 | `org` | yes | org name |
 | `account` | yes | account name. Nested accounts can share a name, so don't use it as a key. |
 | `accountId` | yes | the account, unique in the platform: the logical cluster of the workspace that holds the Account object, and the account name. It is the same pair the account's `AccountInfo` shows as `originClusterId` and `name`. |
+| `accountPath` | planned | the account's kcp workspace path, for example `root:orgs:acme:team-a`. The iam-service API addresses accounts by it. See [milestone 2](milestone-2.md). |
 | `role` | yes | Platform Mesh role, for example `owner` or `member` |
 | `user.id` | yes | the user as Platform Mesh identifies them, see below |
 
@@ -83,6 +84,7 @@ its copy instead of applying changes.
     "org": "acme",
     "account": "team-a",
     "accountId": "a5zld11wopsu1uea/team-a",
+    "accountPath": "root:orgs:acme:team-a",
     "members": [
       { "user": { "id": "alice@example.com" }, "roles": ["owner"] },
       { "user": { "id": "bob@example.com" }, "roles": ["member"] }
@@ -91,8 +93,8 @@ its copy instead of applying changes.
 }
 ```
 
-Attributes and the fields `org`, `account`, `accountId` and `user.id` mean the
-same as for membership events. `time` is when the list was read. Several
+Attributes and the fields `org`, `account`, `accountId`, `accountPath` and
+`user.id` mean the same as for membership events. `time` is when the list was read. Several
 changes to one account can lead to a single snapshot.
 
 - **Keep the newest.** Snapshots can arrive in any order; use the one with the
