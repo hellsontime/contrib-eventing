@@ -26,30 +26,39 @@ event and let each subscriber choose.
    collects the accounts that changed, reads their current members from
    OpenFGA and sends one snapshot per account. No names for now; they are not
    in OpenFGA (see milestone 3). Draft in the [contract](contract.md).
-2. **Block replies.** Every consumer trusts that events come from the
+2. **Account path in events.** A consumer that wants more than the event, for
+   example the members with names, asks iam-service. Its GraphQL API addresses
+   an account by its kcp path (`ResourceContext.accountPath`, e.g.
+   `root:orgs:acme:team-a`), and our events only have the cluster id and the
+   name. Add `accountPath` to membership and snapshot events. OpenFGA only gives
+   the adapter the parent's cluster id; the path is in the parent workspace's
+   `AccountInfo` (`spec.account.path`), plus the account name. Open: how we get
+   read access to `AccountInfo` in all account workspaces, to be agreed with
+   the Platform Mesh owners. Paths can be cached by cluster id.
+3. **Block replies.** Every consumer trusts that events come from the
    platform. Today any subscriber can break that: if its endpoint answers with
    a CloudEvent, Knative puts that event into the broker past our ingress, and
    all other subscribers get it. Tested locally with a forged grant for another
    org. Fix: drop the `knative-eventing` rule from the broker NetworkPolicy
    (tested, e2e passes).
-3. **Dead letters and timeout.** A sink that is down long enough loses events
+4. **Dead letters and timeout.** A sink that is down long enough loses events
    without a trace: with the default of 10 retries Knative waits about 3.5
    minutes in total and then drops them. A consumer needs a place to find what
    it missed. A timeout keeps one slow request from holding a delivery open.
    Add `deadLetterSink` and `timeout` to `Subscription.spec.delivery`.
-4. **Sink allowlist.** Events carry user ids, usually email addresses, and
+5. **Sink allowlist.** Events carry user ids, usually email addresses, and
    today a Subscription can send them to any URL, including services inside the
    cluster. The operator should decide where that data may go. The operator
    sets allowed hosts; other sinks get `Ready=False`, reason `SinkNotAllowed`.
-5. **Try the NATS JetStream channel.** The in-memory channel accepts events
+6. **Try the NATS JetStream channel.** The in-memory channel accepts events
    before delivering them, so a restart of its dispatcher loses undelivered
    ones, and the adapter has already moved on. The JetStream channel stores an
    event before it answers and gives every subscription its own durable
    consumer, so a restart should lose nothing. Only the channel behind our
    broker changes. Try it locally: e2e, a failing sink, a dispatcher restart.
 
-Order: 1 first, it shapes the contract. 2 to 4 alongside, they don't depend on
-each other. 5 after that.
+Order: 1 and 2 first, they shape the contract. 3 to 5 alongside, they don't
+depend on each other. 6 after that.
 
 ## Decided
 
@@ -78,6 +87,14 @@ and a restart clears it, so the first snapshots would miss earlier members.
 It would need a full load at start or a read on the first change per account.
 We add it if OpenFGA suffers from the reads.
 
+**Asking iam-service instead.** The first consumer offered to fetch the list
+themselves if the event tells them which account changed. That needs a way in:
+the members are only in OpenFGA, not in kcp, so a kcp admin kubeconfig doesn't
+help, and the iam-service API wants a Keycloak token and checks
+`get_iam_users` for the token's user on each account. There is no service
+identity for that today. Snapshots work without it, so we send them, and the
+path (item 2) keeps the API option open for anyone who has access.
+
 **Snapshots: names.** The first consumer's lists have names, and they can't
 rule out that a subscriber uses them. Names are in Keycloak, not OpenFGA, and
 reading them needs Keycloak access, which comes with milestone 3. Until then
@@ -99,8 +116,8 @@ Options with a release for Knative v1.23:
 | Option | Maturity | Needs | Effect on us |
 | --- | --- | --- | --- |
 | NATS JetStream channel | beta | a NATS server | only the channel changes |
-| Kafka broker | GA | a Kafka cluster | own ingress, item 2 has to be redone |
-| RabbitMQ broker | GA | RabbitMQ and its operators | own ingress, item 2 has to be redone |
+| Kafka broker | GA | a Kafka cluster | own ingress, item 3 has to be redone |
+| RabbitMQ broker | GA | RabbitMQ and its operators | own ingress, item 3 has to be redone |
 
 JetStream is the smallest step, so we try it first. The JetStream channel
 answers only after `js.Publish` succeeded, which is what we need; we haven't
