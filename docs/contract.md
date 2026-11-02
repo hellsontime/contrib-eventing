@@ -58,6 +58,49 @@ Sent when a user gets or loses a role on an account.
 
 Users are identified the way the platform admin configured Platform Mesh: by the user claim security-operator uses (`--user-claim`, `email` by default). `user.id` is the value Platform Mesh authorizes the user with, so with the default it is the email. Invitations are always written with the email, so with the `sub` claim an invited user who never logged in appears with their email.
 
+## Members snapshot (planned)
+
+Not built yet, see [milestone 2](milestone-2.md). Sent after the members of an
+account changed. It carries the full list as it is in the authorization engine
+when the event is built, so a subscriber that keeps member lists can replace
+its copy instead of applying changes.
+
+| Type | Meaning |
+| --- | --- |
+| `io.platform-mesh.iam.account.members.v1alpha1` | The account's members and their roles now |
+
+```json
+{
+  "specversion": "1.0",
+  "id": "7c1d0e2a9b3f45e8a1c2d3e4f5a6b7c8",
+  "source": "platform-mesh.io/orgs/acme/iam",
+  "type": "io.platform-mesh.iam.account.members.v1alpha1",
+  "subject": "accounts/a5zld11wopsu1uea/team-a",
+  "time": "2026-10-01T09:12:44Z",
+  "pmorg": "acme",
+  "datacontenttype": "application/json",
+  "data": {
+    "org": "acme",
+    "account": "team-a",
+    "accountId": "a5zld11wopsu1uea/team-a",
+    "members": [
+      { "user": { "id": "alice@example.com" }, "roles": ["owner"] },
+      { "user": { "id": "bob@example.com" }, "roles": ["member"] }
+    ]
+  }
+}
+```
+
+Attributes and the fields `org`, `account`, `accountId` and `user.id` mean the
+same as for membership events. `time` is when the list was read. Several
+changes to one account can lead to a single snapshot.
+
+- **Keep the newest.** Snapshots can arrive in any order; use the one with the
+  latest `time`.
+- **An empty list** means the account has no members, for example after it was
+  deleted.
+- **No names.** The list has user ids only.
+
 ## What subscribers should expect
 
 - **Duplicates.** Delivery is at least once. Drop events whose `id` you have already seen.
@@ -69,7 +112,6 @@ Users are identified the way the platform admin configured Platform Mesh: by the
 
 ## Open questions
 
-- Is a stream of changes enough, or do subscribers also need a full snapshot of an account's members to resync?
 - Is the role list fixed, or can adopters define their own roles?
 
 ## Versioning
