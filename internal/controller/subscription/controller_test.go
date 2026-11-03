@@ -47,13 +47,16 @@ func workspace(t *testing.T, objs ...ctrlruntimeclient.Object) ctrlruntimeclient
 }
 
 func subscription() *v1alpha1.Subscription {
-	return &v1alpha1.Subscription{ObjectMeta: metav1.ObjectMeta{Name: "s"}}
+	return &v1alpha1.Subscription{
+		ObjectMeta: metav1.ObjectMeta{Name: "s"},
+		Spec:       v1alpha1.SubscriptionSpec{Sink: v1alpha1.Sink{URI: "http://sink.consumer.svc.cluster.local"}},
+	}
 }
 
 func TestReconcile(t *testing.T) {
 	backend := &fakeBackend{}
 	c := workspace(t, subscription())
-	r := &Reconciler{Delivery: backend}
+	r := &Reconciler{Delivery: backend, AllowedSinkHosts: []string{"*.consumer.svc.cluster.local"}}
 
 	_, err := r.reconcile(context.Background(), c, "c1", types.NamespacedName{Name: "s"})
 	require.NoError(t, err)
@@ -76,4 +79,56 @@ func TestDelete(t *testing.T) {
 	_, err := r.reconcile(context.Background(), c, "c1", types.NamespacedName{Name: "s"})
 	require.NoError(t, err)
 	assert.Equal(t, []string{deliveryName("c1", "s")}, backend.deleted)
+}
+
+func TestSinkNotAllowed(t *testing.T) {
+	for name, allowed := range map[string][]string{
+		"empty allowlist": nil,
+		"other host":      {"sink.other.svc.cluster.local"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			backend := &fakeBackend{}
+			c := workspace(t, subscription())
+			r := &Reconciler{Delivery: backend, AllowedSinkHosts: allowed}
+
+			_, err := r.reconcile(context.Background(), c, "c1", types.NamespacedName{Name: "s"})
+			require.NoError(t, err)
+
+			got := &v1alpha1.Subscription{}
+			require.NoError(t, c.Get(context.Background(), types.NamespacedName{Name: "s"}, got))
+			assert.Equal(t, metav1.ConditionFalse, got.Status.Conditions[0].Status)
+			assert.Equal(t, "SinkNotAllowed", got.Status.Conditions[0].Reason)
+			assert.Empty(t, backend.ensured)
+			assert.Equal(t, []string{deliveryName("c1", "s")}, backend.deleted, "an existing Trigger must go")
+		})
+	}
+}
+
+func TestCheckSinks(t *testing.T) {
+	allowed := []string{"event-display.demo.svc.cluster.local", "*.consumer.svc.cluster.local"}
+	sub := func(sink, deadLetters string) *v1alpha1.Subscription {
+		s := &v1alpha1.Subscription{Spec: v1alpha1.SubscriptionSpec{Sink: v1alpha1.Sink{URI: sink}}}
+		if deadLetters != "" {
+			s.Spec.Delivery = &v1alpha1.Delivery{DeadLetterSink: &v1alpha1.Sink{URI: deadLetters}}
+		}
+		return s
+	}
+	for _, ok := range []*v1alpha1.Subscription{
+		sub("http://event-display.demo.svc.cluster.local", ""),
+		sub("https://EVENT-DISPLAY.demo.svc.cluster.local:8443/path", ""),
+		sub("http://a.consumer.svc.cluster.local", "http://b.consumer.svc.cluster.local"),
+		sub("http://a.b.consumer.svc.cluster.local", ""),
+	} {
+		assert.NoError(t, checkSinks(ok, allowed), ok.Spec.Sink.URI)
+	}
+	for _, bad := range []*v1alpha1.Subscription{
+		sub("http://example.com", ""),
+		sub("http://consumer.svc.cluster.local", ""),
+		sub("http://evilconsumer.svc.cluster.local", ""),
+		sub("http://event-display.demo.svc.cluster.local.example.com", ""),
+		sub("http://a.consumer.svc.cluster.local", "http://example.com"),
+		sub("http://", ""),
+	} {
+		assert.Error(t, checkSinks(bad, allowed), bad.Spec.Sink.URI)
+	}
 }

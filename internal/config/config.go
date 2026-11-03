@@ -20,6 +20,8 @@ type SubscriptionControllerConfig struct {
 	APIExportEndpointSlice string
 	// BrokerNamespace holds the Knative Broker and the Triggers.
 	BrokerNamespace string
+	// AllowedSinkHosts are the hosts sinks may point at. Empty allows none.
+	AllowedSinkHosts []string
 }
 
 func NewSubscriptionControllerConfig() SubscriptionControllerConfig {
@@ -34,6 +36,7 @@ func (c *SubscriptionControllerConfig) AddFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.KCPKubeconfig, "kcp-kubeconfig", c.KCPKubeconfig, "kubeconfig for the provider workspace in kcp")
 	fs.StringVar(&c.APIExportEndpointSlice, "apiexport-endpointslice", c.APIExportEndpointSlice, "APIExportEndpointSlice to watch Subscriptions through")
 	fs.StringVar(&c.BrokerNamespace, "broker-namespace", c.BrokerNamespace, "namespace of the Knative Broker and Triggers (default from POD_NAMESPACE)")
+	fs.StringSliceVar(&c.AllowedSinkHosts, "allowed-sink-hosts", c.AllowedSinkHosts, "hosts sinks and dead letter sinks may point at, exact or *.suffix; empty allows none")
 }
 
 type OpenFGAAdapterConfig struct {

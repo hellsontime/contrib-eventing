@@ -32,6 +32,9 @@ const finalizer = "eventing.platform-mesh.io/delivery"
 type Reconciler struct {
 	Manager  mcmanager.Manager
 	Delivery delivery.Backend
+	// AllowedSinkHosts are the hosts sinks may point at: a host name, or
+	// *.suffix for every host below suffix.
+	AllowedSinkHosts []string
 }
 
 func (r *Reconciler) SetupWithManager(mgr mcmanager.Manager) error {
@@ -69,6 +72,14 @@ func (r *Reconciler) reconcile(ctx context.Context, c ctrlruntimeclient.Client, 
 		if err := c.Update(ctx, sub); err != nil {
 			return ctrl.Result{}, err
 		}
+	}
+
+	if err := checkSinks(sub, r.AllowedSinkHosts); err != nil {
+		// Stop delivery that was set up before the sink changed.
+		if err := r.Delivery.Delete(ctx, name); err != nil {
+			return ctrl.Result{}, err
+		}
+		return setStatus(ctx, c, sub, delivery.Status{Reason: "SinkNotAllowed", Message: err.Error()}, 0)
 	}
 
 	status, err := r.Delivery.Ensure(ctx, name, sub)
