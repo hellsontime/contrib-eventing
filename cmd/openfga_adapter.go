@@ -20,6 +20,7 @@ import (
 
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 	ctrlruntimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -65,7 +66,14 @@ func runOpenFGAAdapter(_ *cobra.Command, _ []string) { // coverage-ignore
 			return pub.Publish(ctx, cfg.IngressURL, e)
 		},
 	}
-	log.Info().Str("openfga", cfg.OpenFGAURL).Msg("starting adapter")
+	if cfg.CoreKubeconfig != "" {
+		coreCfg, err := clientcmd.BuildConfigFromFlags("", cfg.CoreKubeconfig)
+		if err != nil {
+			log.Fatal().Err(err).Msg("unable to load core kubeconfig")
+		}
+		a.Paths = &openfga.PathResolver{Config: coreCfg, EndpointSlice: cfg.CoreEndpointSlice}
+	}
+	log.Info().Str("openfga", cfg.OpenFGAURL).Bool("accountPaths", a.Paths != nil).Msg("starting adapter")
 	if err := a.Run(ctx); err != nil {
 		log.Fatal().Err(err).Msg("adapter stopped")
 	}

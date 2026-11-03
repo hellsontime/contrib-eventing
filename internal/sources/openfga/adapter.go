@@ -35,6 +35,8 @@ const (
 // gives each org a store named like the org.
 type Adapter struct {
 	FGA *Client
+	// Paths finds account paths. Without it events have no accountPath.
+	Paths *PathResolver
 	// SkipStores are stores that do not belong to an org.
 	SkipStores []string
 	Kube       ctrlruntimeclient.Client
@@ -173,12 +175,17 @@ func changeKey(c Change) string {
 }
 
 func (a *Adapter) publishChange(ctx context.Context, org string, m membership, c Change, key string) error {
+	path, err := a.accountPath(ctx, m)
+	if err != nil {
+		return err
+	}
 	e, err := contract.MembershipChanged(c.Operation == opWrite, contract.Membership{
-		Org:       org,
-		Account:   m.account,
-		AccountID: contract.AccountID(m.cluster, m.account),
-		Role:      m.role,
-		User:      contract.User{ID: m.user},
+		Org:         org,
+		Account:     m.account,
+		AccountID:   contract.AccountID(m.cluster, m.account),
+		AccountPath: path,
+		Role:        m.role,
+		User:        contract.User{ID: m.user},
 	}, key, c.Timestamp)
 	if err != nil {
 		return err
@@ -189,20 +196,32 @@ func (a *Adapter) publishChange(ctx context.Context, org string, m membership, c
 // publishMembers sends the account's members as they are now. A deleted
 // account has none left.
 func (a *Adapter) publishMembers(ctx context.Context, org, storeID string, m membership, key string) error {
+	path, err := a.accountPath(ctx, m)
+	if err != nil {
+		return err
+	}
 	members, err := readMembers(ctx, a.FGA, storeID, m.cluster, m.account)
 	if err != nil {
 		return err
 	}
 	e, err := contract.MembersSnapshot(contract.AccountMembers{
-		Org:       org,
-		Account:   m.account,
-		AccountID: contract.AccountID(m.cluster, m.account),
-		Members:   members,
+		Org:         org,
+		Account:     m.account,
+		AccountID:   contract.AccountID(m.cluster, m.account),
+		AccountPath: path,
+		Members:     members,
 	}, key, time.Now())
 	if err != nil {
 		return err
 	}
 	return a.publish(ctx, org, e)
+}
+
+func (a *Adapter) accountPath(ctx context.Context, m membership) (string, error) {
+	if a.Paths == nil {
+		return "", nil
+	}
+	return a.Paths.Path(ctx, m.cluster, m.account)
 }
 
 func (a *Adapter) publish(ctx context.Context, org string, e cloudevents.Event) error {

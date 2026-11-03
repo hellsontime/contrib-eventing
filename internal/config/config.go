@@ -45,6 +45,10 @@ type OpenFGAAdapterConfig struct {
 	Interval   time.Duration
 	// Namespace holds the adapter's state ConfigMap.
 	Namespace string
+	// CoreKubeconfig reaches the workspace of the core.platform-mesh.io export,
+	// to read account paths. Empty means events have no accountPath.
+	CoreKubeconfig    string
+	CoreEndpointSlice string
 }
 
 func NewOpenFGAAdapterConfig() OpenFGAAdapterConfig {
@@ -55,6 +59,9 @@ func NewOpenFGAAdapterConfig() OpenFGAAdapterConfig {
 		TokenFile:  "/var/run/secrets/contrib-eventing/token",
 		Interval:   5 * time.Second,
 		Namespace:  os.Getenv("POD_NAMESPACE"),
+
+		CoreKubeconfig:    "/kcp/kubeconfig",
+		CoreEndpointSlice: "core.platform-mesh.io",
 	}
 }
 
@@ -65,6 +72,8 @@ func (c *OpenFGAAdapterConfig) AddFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.TokenFile, "token-file", c.TokenFile, "ServiceAccount token the ingress accepts")
 	fs.DurationVar(&c.Interval, "interval", c.Interval, "how often to read the changelog")
 	fs.StringVar(&c.Namespace, "namespace", c.Namespace, "namespace of the state ConfigMap (default from POD_NAMESPACE)")
+	fs.StringVar(&c.CoreKubeconfig, "core-kubeconfig", c.CoreKubeconfig, "kubeconfig for the workspace of the core.platform-mesh.io export, to read account paths; empty leaves them out")
+	fs.StringVar(&c.CoreEndpointSlice, "core-endpointslice", c.CoreEndpointSlice, "APIExportEndpointSlice to read AccountInfo through")
 }
 
 type IngressConfig struct {
