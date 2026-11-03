@@ -50,10 +50,13 @@ grep -q "subject: accounts/$account_id" <<<"$event" && pass "subject" || fail "s
 grep -q "\"accountId\": \"$account_id\"" <<<"$event" && pass "accountId" || fail "accountId missing"
 grep -q "pmorg: $ORG" <<<"$event" && pass "pmorg" || fail "pmorg missing"
 grep -q '"role": "member"' <<<"$event" && pass "role" || fail "role missing"
+grep -q "\"accountPath\": \"root:orgs:$ORG\"" <<<"$event" && pass "accountPath" || fail "accountPath missing"
 grep -q "\"id\": \"$DEMO_USER\"" <<<"$event" && pass "user.id by the configured claim (email)" || fail "user missing"
 # The demo user created the org, so they are its owner, too.
 [[ $(roles "$account_id" "$DEMO_USER") == '["member","owner"]' ]] && pass "snapshot lists the new role" ||
   fail "snapshot: $(roles "$account_id" "$DEMO_USER")"
+path=$(last_snapshot "$account_id" | jq -r .accountPath)
+[[ $path == "root:orgs:$ORG" ]] && pass "snapshot accountPath" || fail "snapshot accountPath: $path"
 
 log "An invited user is announced the same way"
 invited=invited-$RANDOM@example.com
@@ -128,6 +131,8 @@ wait_for "owner grant for the outer account" 30 announced "$outer" && pass "subj
 wait_for "owner grant for the inner account" 30 announced "$inner" && pass "subject accounts/$inner"
 owner_listed() { [[ $(roles "$inner" "$DEMO_USER") == '["owner"]' ]]; }
 wait_for "a snapshot of the inner account" 30 owner_listed && pass "snapshot of the inner account"
+path=$(last_snapshot "$inner" | jq -r .accountPath)
+[[ $path == "root:orgs:$ORG:e2e-account:e2e-account" ]] && pass "accountPath $path" || fail "inner accountPath: $path"
 kcp "root:orgs:$ORG:e2e-account" delete account e2e-account --wait=false >/dev/null
 no_members() { [[ $(last_snapshot "$inner" | jq -c .members) == "[]" ]]; }
 wait_for "an empty snapshot of the deleted account" 120 no_members && pass "deleted account: empty snapshot"

@@ -192,6 +192,7 @@ components:
             org: acme
             account: team-a
             accountId: a5zld11wopsu1uea/team-a
+            accountPath: root:orgs:acme:team-a
             role: member
             user:
               id: alice@example.com
@@ -205,6 +206,7 @@ components:
             org: acme
             account: team-a
             accountId: a5zld11wopsu1uea/team-a
+            accountPath: root:orgs:acme:team-a
             members:
               - user:
                   id: alice@example.com
@@ -235,6 +237,11 @@ components:
           description: |
             The account, unique in the platform: the logical cluster of the workspace that
             holds the Account object and the account name (AccountInfo originClusterId/name).
+        accountPath:
+          type: string
+          description: |
+            The account's kcp workspace path, as the iam-service API uses it. Missing if the
+            workspace that holds the Account was gone when the event was built.
         role:
           type: string
           description: Platform Mesh role, for example owner or member.
@@ -253,6 +260,9 @@ components:
         accountId:
           type: string
           description: The account, as in Membership.
+        accountPath:
+          type: string
+          description: The account's kcp workspace path, as in Membership.
         members:
           type: array
           description: Everyone with a role on the account, sorted by user id. Empty if the account was deleted.

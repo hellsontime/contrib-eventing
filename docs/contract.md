@@ -29,6 +29,7 @@ Sent when a user gets or loses a role on an account.
     "org": "acme",
     "account": "team-a",
     "accountId": "a5zld11wopsu1uea/team-a",
+    "accountPath": "root:orgs:acme:team-a",
     "role": "member",
     "user": { "id": "alice@example.com" }
   }
@@ -53,6 +54,7 @@ Sent when a user gets or loses a role on an account.
 | `org` | yes | org name |
 | `account` | yes | account name. Nested accounts can share a name, so don't use it as a key. |
 | `accountId` | yes | the account, unique in the platform: the logical cluster of the workspace that holds the Account object, and the account name. It is the same pair the account's `AccountInfo` shows as `originClusterId` and `name`. |
+| `accountPath` | no | the account's kcp workspace path, for example `root:orgs:acme:team-a`. The iam-service API addresses accounts by it. Missing if the workspace that holds the Account was already gone when the event was built. |
 | `role` | yes | Platform Mesh role, for example `owner` or `member` |
 | `user.id` | yes | the user as Platform Mesh identifies them, see below |
 
@@ -82,6 +84,7 @@ keeps member lists can replace its copy instead of applying changes.
     "org": "acme",
     "account": "team-a",
     "accountId": "a5zld11wopsu1uea/team-a",
+    "accountPath": "root:orgs:acme:team-a",
     "members": [
       { "user": { "id": "alice@example.com" }, "roles": ["owner"] },
       { "user": { "id": "bob@example.com" }, "roles": ["member"] }
@@ -90,8 +93,8 @@ keeps member lists can replace its copy instead of applying changes.
 }
 ```
 
-Attributes and the fields `org`, `account`, `accountId` and `user.id` mean the
-same as for membership events. `time` is when the list was read. `members` is
+Attributes and the fields `org`, `account`, `accountId`, `accountPath` and
+`user.id` mean the same as for membership events. `time` is when the list was read. `members` is
 sorted by `user.id`, `roles` by name. Several changes to one account can lead
 to a single snapshot.
 
