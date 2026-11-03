@@ -226,6 +226,35 @@ add_member --remove "$DEMO_USER" member
 admin delete subscription e2e-replies --timeout=60s >/dev/null
 kind_kubectl -n eventing-demo-sink delete pod/reply-sink svc/reply-sink cm/reply-sink --wait=false >/dev/null
 
+log "Events a sink doesn't take go to the dead letter sink"
+dead=http://nobody.eventing-demo-sink.svc.cluster.local
+admin apply -f - >/dev/null <<YAML
+apiVersion: eventing.platform-mesh.io/v1alpha1
+kind: Subscription
+metadata: {name: e2e-dead-letters}
+spec:
+  filter: {types: [io.platform-mesh.iam.account.members.v1alpha1]}
+  sink: {uri: $dead}
+  delivery:
+    retry: 1
+    backoffDelay: PT0.2S
+    timeout: PT5S
+    deadLetterSink: {uri: http://event-display.eventing-demo-sink.svc.cluster.local}
+YAML
+dead_ready() { [[ $(admin get subscription e2e-dead-letters -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}') == True ]]; }
+wait_for "dead letter Subscription ready" 60 dead_ready
+timeout=$(kind_kubectl -n "$NS" get triggers -o json | jq -r --arg u "$dead" '.items[] | select(.spec.subscriber.uri == $u) | .spec.delivery.timeout')
+[[ $timeout == PT5S ]] && pass "timeout on the Trigger" || fail "Trigger timeout: $timeout"
+sleep 5
+# Knative marks dead letters with the destination that failed.
+dead_letters() { sink_logs | grep -c "knativeerrordest: $dead" || true; }
+before=$(dead_letters)
+add_member "$DEMO_USER" member
+more_dead_letters() { (($(dead_letters) > before)); }
+wait_for "a dead letter at event-display" 60 more_dead_letters && pass "dead letter delivered"
+add_member --remove "$DEMO_USER" member
+admin delete subscription e2e-dead-letters --timeout=60s >/dev/null
+
 log "No events after the Subscription is deleted"
 admin delete subscription $sub --timeout=60s >/dev/null
 before=$(count granted)

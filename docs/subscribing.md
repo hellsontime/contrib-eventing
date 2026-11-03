@@ -46,9 +46,19 @@ spec:
     uri: http://my-consumer.my-namespace.svc.cluster.local
   delivery:
     retry: 3
+    timeout: PT10S   # optional, per request
+    deadLetterSink:  # optional
+      uri: http://my-dead-letters.my-namespace.svc.cluster.local
 EOF
 kcp root:providers:eventing get subscriptions
 ```
+
+`delivery` is optional. `retry` is the number of retries after the first
+failed attempt; `backoffPolicy` (`linear` or `exponential`) and `backoffDelay`
+(ISO 8601, e.g. `PT0.5S`) shape the wait in between. `timeout` limits a single
+request. An event that still failed after the last retry goes to
+`deadLetterSink`, with Knative's `knativeerrordest`, `knativeerrorcode` and
+`knativeerrordata` attributes added. Without a dead letter sink it is dropped.
 
 The Subscription is ready when `READY` is `True`; otherwise `REASON` says what
 is missing. Events start arriving with the next membership change. Deleting the
