@@ -22,6 +22,12 @@ The rules that matter:
   already seen. There is no order between events.
 - The endpoint must be reachable from inside the cluster, for example as a
   Kubernetes Service. Requests come without credentials.
+- Its host must be on the platform operator's allowlist (the controller's
+  `--allowed-sink-hosts`: host names, or `*.suffix` for everything below a
+  domain). Events carry user ids, so the operator decides where they may go.
+  Otherwise the Subscription stays `Ready=False` with reason `SinkNotAllowed`.
+  The same goes for the dead letter sink. The local install allows
+  `*.eventing-demo-sink.svc.cluster.local`.
 
 ## 2. Create a Subscription
 
@@ -66,5 +72,4 @@ Subscription stops delivery.
 
 ## Limits in milestone 1
 
-- Any sink URL is accepted, and events not yet delivered are lost when the
-  in-memory channel restarts.
+- Events not yet delivered are lost when the in-memory channel restarts.

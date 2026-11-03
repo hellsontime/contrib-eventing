@@ -255,6 +255,31 @@ wait_for "a dead letter at event-display" 60 more_dead_letters && pass "dead let
 add_member --remove "$DEMO_USER" member
 admin delete subscription e2e-dead-letters --timeout=60s >/dev/null
 
+log "Sinks outside the allowlist get nothing"
+allowed=http://event-display.eventing-demo-sink.svc.cluster.local
+not_allowed=http://example.com
+reason() { admin get subscription e2e-not-allowed -o jsonpath='{.status.conditions[?(@.type=="Ready")].reason}'; }
+is_reason() { [[ $(reason) == "$1" ]]; }
+triggers() { kind_kubectl -n "$NS" get triggers -o json | jq '[.items[] | select(.metadata.annotations["eventing.platform-mesh.io/subscription"] == "e2e-not-allowed")] | length'; }
+admin apply -f - >/dev/null <<YAML
+apiVersion: eventing.platform-mesh.io/v1alpha1
+kind: Subscription
+metadata: {name: e2e-not-allowed}
+spec:
+  filter: {types: [io.platform-mesh.iam.account.members.v1alpha1]}
+  sink: {uri: $not_allowed}
+YAML
+wait_for "SinkNotAllowed" 60 is_reason SinkNotAllowed && pass "sink $not_allowed: SinkNotAllowed"
+[[ $(triggers) == 0 ]] && pass "no Trigger" || fail "Trigger for $not_allowed"
+# An allowed sink works; a dead letter sink outside the allowlist stops it again.
+admin patch subscription e2e-not-allowed --type merge -p "{\"spec\":{\"sink\":{\"uri\":\"$allowed\"}}}" >/dev/null
+wait_for "Ready" 60 is_reason Ready && pass "allowed sink: Ready"
+[[ $(triggers) == 1 ]] || fail "no Trigger for the allowed sink"
+admin patch subscription e2e-not-allowed --type merge -p "{\"spec\":{\"delivery\":{\"deadLetterSink\":{\"uri\":\"$not_allowed\"}}}}" >/dev/null
+wait_for "SinkNotAllowed" 60 is_reason SinkNotAllowed && pass "dead letter sink $not_allowed: SinkNotAllowed"
+[[ $(triggers) == 0 ]] && pass "Trigger removed" || fail "Trigger still there"
+admin delete subscription e2e-not-allowed --timeout=60s >/dev/null
+
 log "No events after the Subscription is deleted"
 admin delete subscription $sub --timeout=60s >/dev/null
 before=$(count granted)

@@ -27,7 +27,7 @@ flowchart LR
 | OpenFGA adapter | Reads the OpenFGA changelog and turns membership changes into events | us |
 | Ingress | Checks who is sending, then hands the event to the broker. Reachable through the platform's Gateway | us |
 | Subscription API | A kcp resource for platform admins in `root:providers:eventing`: event types, optional orgs, target URL, retry settings | us |
-| Subscription controller | Turns each Subscription into a Knative Trigger and reports status back | us |
+| Subscription controller | Checks the sink against the operator's allowlist, turns each Subscription into a Knative Trigger and reports status back | us |
 | Delivery | Fan-out, filtering by type, retries, dead letters | Knative Eventing |
 
 ## An event, step by step
@@ -72,6 +72,5 @@ These came out of the [spike](https://github.com/platform-mesh/backlog/issues/42
 
 - The Knative broker ingress accepts any event from inside the cluster, which is why our own ingress sits in front of it. A NetworkPolicy lets only our ingress reach the broker ingress.
 - The ingress accepts only the platform's own adapters so far. Providers publishing events for their orgs is not built yet.
-- Subscriptions accept any URL. Targets should be limited by an allowlist that the platform operator controls.
 - Replies are blocked by the same NetworkPolicy. If a subscriber answers with a CloudEvent, Knative's broker filter tries to send it to the broker ingress, which doesn't let it in; the filter retries for a while and drops it. Knative OIDC with an EventPolicy per broker would reject replies properly, but it is alpha and switched on for the whole cluster.
 - The ingress is reachable at `eventing.services.<domain>` through the `terminate-services` listener of the platform Gateway. In the kind setup the platform certificate covers `*.<domain>` but not `*.services.<domain>`, so that host gets Traefik's default certificate.
