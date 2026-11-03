@@ -122,9 +122,11 @@ func (a *Adapter) poll(ctx context.Context) error {
 	return nil
 }
 
-// publishNew publishes the org's new membership changes page by page. The
-// token only moves after every event of a page was accepted; if one fails, the
-// whole page is read again next time. Consumers drop the repeats by event id.
+// publishNew publishes the org's new membership changes page by page. After
+// the changes of a page it sends one members snapshot per account that
+// changed. The token only moves after every event of a page was accepted; if
+// one fails, the whole page is read again next time. Consumers drop the
+// repeats by event id.
 func (a *Adapter) publishNew(ctx context.Context, org string, st *orgState) (bool, error) {
 	moved := false
 	for {
@@ -132,8 +134,26 @@ func (a *Adapter) publishNew(ctx context.Context, org string, st *orgState) (boo
 		if err != nil {
 			return moved, err
 		}
+		// The accounts that changed in this page, in order, with their last change.
+		var accounts []membership
+		lastKey := map[string]string{}
 		for _, c := range changes {
-			if err := a.publishChange(ctx, org, c); err != nil {
+			m, ok := parseMembership(c.TupleKey)
+			if !ok {
+				continue
+			}
+			key := changeKey(c)
+			if err := a.publishChange(ctx, org, m, c, key); err != nil {
+				return moved, err
+			}
+			id := contract.AccountID(m.cluster, m.account)
+			if _, seen := lastKey[id]; !seen {
+				accounts = append(accounts, m)
+			}
+			lastKey[id] = key
+		}
+		for _, m := range accounts {
+			if err := a.publishMembers(ctx, org, st.StoreID, m, lastKey[contract.AccountID(m.cluster, m.account)]); err != nil {
 				return moved, err
 			}
 		}
@@ -147,14 +167,13 @@ func (a *Adapter) publishNew(ctx context.Context, org string, st *orgState) (boo
 	}
 }
 
-func (a *Adapter) publishChange(ctx context.Context, org string, c Change) error {
-	m, ok := parseMembership(c)
-	if !ok {
-		return nil
-	}
-	granted := c.Operation == opWrite
-	key := fmt.Sprintf("openfga/%s/%s/%s/%s/%s", c.Operation, c.TupleKey.User, c.TupleKey.Relation, c.TupleKey.Object, c.Timestamp.Format(time.RFC3339Nano))
-	e, err := contract.MembershipChanged(granted, contract.Membership{
+// changeKey identifies a change in the changelog.
+func changeKey(c Change) string {
+	return fmt.Sprintf("openfga/%s/%s/%s/%s/%s", c.Operation, c.TupleKey.User, c.TupleKey.Relation, c.TupleKey.Object, c.Timestamp.Format(time.RFC3339Nano))
+}
+
+func (a *Adapter) publishChange(ctx context.Context, org string, m membership, c Change, key string) error {
+	e, err := contract.MembershipChanged(c.Operation == opWrite, contract.Membership{
 		Org:       org,
 		Account:   m.account,
 		AccountID: contract.AccountID(m.cluster, m.account),
@@ -164,6 +183,29 @@ func (a *Adapter) publishChange(ctx context.Context, org string, c Change) error
 	if err != nil {
 		return err
 	}
+	return a.publish(ctx, org, e)
+}
+
+// publishMembers sends the account's members as they are now. A deleted
+// account has none left.
+func (a *Adapter) publishMembers(ctx context.Context, org, storeID string, m membership, key string) error {
+	members, err := readMembers(ctx, a.FGA, storeID, m.cluster, m.account)
+	if err != nil {
+		return err
+	}
+	e, err := contract.MembersSnapshot(contract.AccountMembers{
+		Org:       org,
+		Account:   m.account,
+		AccountID: contract.AccountID(m.cluster, m.account),
+		Members:   members,
+	}, key, time.Now())
+	if err != nil {
+		return err
+	}
+	return a.publish(ctx, org, e)
+}
+
+func (a *Adapter) publish(ctx context.Context, org string, e cloudevents.Event) error {
 	if err := a.Publish(ctx, e); err != nil {
 		return err
 	}
