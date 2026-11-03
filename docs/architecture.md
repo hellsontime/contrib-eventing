@@ -24,7 +24,7 @@ flowchart LR
 
 | Part | What it does | Who builds it |
 | --- | --- | --- |
-| OpenFGA adapter | Reads the OpenFGA changelog and turns membership changes into events | us |
+| OpenFGA adapter | Reads the OpenFGA changelog and turns membership changes into events, plus a snapshot of the members of each changed account | us |
 | Ingress | Checks who is sending, then hands the event to the broker. Reachable through the platform's Gateway | us |
 | Subscription API | A kcp resource for platform admins in `root:providers:eventing`: event types, optional orgs, target URL, retry settings | us |
 | Subscription controller | Checks the sink against the operator's allowlist, turns each Subscription into a Knative Trigger and reports status back | us |
@@ -53,7 +53,8 @@ Org-level and account-level subscriptions are not in the first milestone.
 The module does not change Platform Mesh components. It needs:
 
 - an APIExport for the Subscription API, bound in its own workspace;
-- read access to the OpenFGA changelog;
+- read access to the OpenFGA changelog and tuples;
+- read access to `AccountInfo` through the `core.platform-mesh.io` export, for account paths: a provider connection like the one iam-service gets;
 - Knative Eventing in the cluster, used by eventing only. A NetworkPolicy lets only our ingress reach Knative's broker ingress, and that ingress is shared by every broker in the cluster;
 - an HTTPRoute on the platform's Gateway, so publishers outside the cluster can reach the ingress.
 
