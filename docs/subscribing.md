@@ -15,8 +15,8 @@ explains the fields.
 The rules that matter:
 
 - Answer with a 2xx and an **empty body**, quickly. A body that is not a
-  CloudEvent counts as a failed delivery. A body that is a CloudEvent is
-  published again as a new event, so never send one.
+  CloudEvent counts as a failed delivery. A body that is a CloudEvent is taken
+  as a reply; replies are blocked and dropped, they never reach anyone.
 - 404, 408, 409, 429 and 5xx are retried with backoff; any other status is not.
 - The same event can arrive more than once. Drop events whose `ce-id` you have
   already seen. There is no order between events.
@@ -56,8 +56,5 @@ Subscription stops delivery.
 
 ## Limits in milestone 1
 
-- Replies are not blocked yet: an endpoint that answers with a CloudEvent
-  injects that event into the platform stream, past the ingress. This is fixed
-  before a first consumer (milestone 2).
 - Any sink URL is accepted, and events not yet delivered are lost when the
   in-memory channel restarts.

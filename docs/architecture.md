@@ -70,8 +70,8 @@ If eventing is not installed, Platform Mesh works exactly as before.
 
 These came out of the [spike](https://github.com/platform-mesh/backlog/issues/421) and are open work:
 
-- The Knative broker ingress accepts any event from inside the cluster, which is why our own ingress sits in front of it. A NetworkPolicy lets only our ingress (and Knative itself) reach the broker ingress.
+- The Knative broker ingress accepts any event from inside the cluster, which is why our own ingress sits in front of it. A NetworkPolicy lets only our ingress reach the broker ingress.
 - The ingress accepts only the platform's own adapters so far. Providers publishing events for their orgs is not built yet.
 - Subscriptions accept any URL. Targets should be limited by an allowlist that the platform operator controls.
-- A subscriber that answers with a CloudEvent injects it into the stream: Knative treats the answer as a reply and sends it back to the broker, past our ingress. Accepted for milestone 1, to be fixed before a first consumer. Dropping the `knative-eventing` rule from the NetworkPolicy blocks replies; Knative OIDC with an EventPolicy would reject them properly.
+- Replies are blocked by the same NetworkPolicy. If a subscriber answers with a CloudEvent, Knative's broker filter tries to send it to the broker ingress, which doesn't let it in; the filter retries for a while and drops it. Knative OIDC with an EventPolicy per broker would reject replies properly, but it is alpha and switched on for the whole cluster.
 - The ingress is reachable at `eventing.services.<domain>` through the `terminate-services` listener of the platform Gateway. In the kind setup the platform certificate covers `*.<domain>` but not `*.services.<domain>`, so that host gets Traefik's default certificate.

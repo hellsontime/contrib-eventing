@@ -211,9 +211,12 @@ spec:
         - name: ingress
           port: 80
 ---
-# Knative's broker ingress accepts any event that reaches it. Only our ingress,
-# and Knative itself for reply events, may reach it. That ingress is shared by
-# every Broker in the cluster, so Knative must be used by eventing only.
+# Knative's broker ingress accepts any event that reaches it. Only our ingress
+# may reach it. That also blocks replies: if a sink answers with a CloudEvent,
+# Knative's broker filter sends it back to the broker ingress, past our ingress,
+# and it would reach every subscriber. The filter retries a blocked reply for a
+# while and drops it. The broker ingress is shared by every Broker in the
+# cluster, so Knative must be used by eventing only.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -230,9 +233,3 @@ spec:
             matchLabels: {kubernetes.io/metadata.name: contrib-eventing}
           podSelector:
             matchLabels: {app: ingress}
-        # TODO: this rule lets replies through, and a reply can be any event a
-        # sink makes up, so it reaches subscribers without passing our ingress.
-        # Dropping the rule blocks replies (tested, e2e passes); Knative OIDC
-        # with an EventPolicy would reject them properly. See docs/roadmap.md.
-        - namespaceSelector:
-            matchLabels: {kubernetes.io/metadata.name: knative-eventing}

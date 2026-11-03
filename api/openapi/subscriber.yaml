@@ -11,7 +11,7 @@ info:
 
     Answer with a 2xx status and an empty body, quickly. A non-empty body that
     is not a CloudEvent counts as a failed delivery. A body that is a
-    CloudEvent is taken as a reply and published again, so never send one.
+    CloudEvent is taken as a reply; replies are blocked and dropped.
 
     Delivery is at least once and unordered: drop events whose `ce-id` you have
     already seen.
