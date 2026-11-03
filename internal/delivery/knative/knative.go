@@ -114,6 +114,12 @@ func triggerSpec(sub *v1alpha1.Subscription) map[string]any {
 		if d.BackoffDelay != nil {
 			delivery["backoffDelay"] = *d.BackoffDelay
 		}
+		if d.Timeout != nil {
+			delivery["timeout"] = *d.Timeout
+		}
+		if d.DeadLetterSink != nil {
+			delivery["deadLetterSink"] = map[string]any{"uri": d.DeadLetterSink.URI}
+		}
 		spec["delivery"] = delivery
 	}
 	return spec

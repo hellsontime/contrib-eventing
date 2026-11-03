@@ -37,6 +37,22 @@ func TestTriggerSpec(t *testing.T) {
 	}, triggerSpec(sub))
 }
 
+func TestTriggerSpecDeadLetters(t *testing.T) {
+	timeout := "PT10S"
+	sub := &v1alpha1.Subscription{Spec: v1alpha1.SubscriptionSpec{
+		Filter: v1alpha1.Filter{Types: []string{"a"}},
+		Sink:   v1alpha1.Sink{URI: "http://sink"},
+		Delivery: &v1alpha1.Delivery{
+			Timeout:        &timeout,
+			DeadLetterSink: &v1alpha1.Sink{URI: "http://dead-letters"},
+		},
+	}}
+	assert.Equal(t, map[string]any{
+		"timeout":        "PT10S",
+		"deadLetterSink": map[string]any{"uri": "http://dead-letters"},
+	}, triggerSpec(sub)["delivery"])
+}
+
 func TestEnsureBrokerIsAsync(t *testing.T) {
 	ctx := context.Background()
 	b := &Backend{Client: fake.NewClientBuilder().Build(), Namespace: "contrib-eventing"}
