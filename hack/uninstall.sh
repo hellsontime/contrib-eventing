@@ -24,15 +24,17 @@ kind_kubectl delete ns "$NS" eventing-demo-sink --ignore-not-found --wait=false 
 kind_kubectl delete clusterrolebinding contrib-eventing-ingress-auth-delegator --ignore-not-found >/dev/null
 kind_kubectl -n knative-eventing delete networkpolicy contrib-eventing-broker-ingress --ignore-not-found >/dev/null 2>&1 || true
 
-# The provider connection has to go before the export. The platform-mesh-operator
+# The provider connections have to go before the export. The platform-mesh-operator
 # stops at the first connection it cannot handle.
 log "Removing the eventing API from kcp"
-index=$(kind_kubectl -n platform-mesh-system get platformmesh platform-mesh -o json |
-  jq '(.spec.kcp.extraProviderConnections // []) | map(.secret) | index("contrib-eventing-kcp") // empty')
-if [[ -n $index ]]; then
-  kind_kubectl -n platform-mesh-system patch platformmesh platform-mesh --type json \
-    -p "[{\"op\": \"remove\", \"path\": \"/spec/kcp/extraProviderConnections/$index\"}]" >/dev/null
-fi
+for secret in contrib-eventing-kcp contrib-eventing-core; do
+  index=$(kind_kubectl -n platform-mesh-system get platformmesh platform-mesh -o json |
+    jq --arg s "$secret" '(.spec.kcp.extraProviderConnections // []) | map(.secret) | index($s) // empty')
+  if [[ -n $index ]]; then
+    kind_kubectl -n platform-mesh-system patch platformmesh platform-mesh --type json \
+      -p "[{\"op\": \"remove\", \"path\": \"/spec/kcp/extraProviderConnections/$index\"}]" >/dev/null
+  fi
+done
 kcp root:providers delete workspace eventing --ignore-not-found >/dev/null
 
 if ! $keep_org; then
