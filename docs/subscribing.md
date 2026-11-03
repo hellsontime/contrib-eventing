@@ -40,6 +40,7 @@ spec:
     types:
       - io.platform-mesh.iam.membership.granted.v1alpha1
       - io.platform-mesh.iam.membership.revoked.v1alpha1
+      - io.platform-mesh.iam.account.members.v1alpha1
     orgs: [acme]   # optional; without it you get all orgs
   sink:
     uri: http://my-consumer.my-namespace.svc.cluster.local
