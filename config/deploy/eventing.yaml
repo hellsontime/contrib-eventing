@@ -90,7 +90,7 @@ spec:
         - name: controller
           image: ${IMAGE}
           imagePullPolicy: Never
-          args: [subscription-controller, --kcp-kubeconfig=/kcp/kubeconfig]
+          args: [subscription-controller, --kcp-kubeconfig=/kcp/kubeconfig, "--allowed-sink-hosts=${ALLOWED_SINK_HOSTS}"]
           env:
             - name: POD_NAMESPACE
               valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
