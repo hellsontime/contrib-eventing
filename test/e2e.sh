@@ -15,6 +15,18 @@ count() { sink_logs | grep -c "type: io.platform-mesh.iam.membership.$1" || true
 more_than() { (($(count "$1") > $2)); }
 # The last event of a type, as event-display prints it.
 last_event() { sink_logs | grep -A23 "type: io.platform-mesh.iam.membership.$1" | tail -24; }
+snapshots() { sink_logs | grep -c "type: io.platform-mesh.iam.account.members" || true; }
+more_snapshots_than() { (($(snapshots) > $1)); }
+# The data of the last members snapshot of an account.
+last_snapshot() {
+  sink_logs | awk -v subject="subject: accounts/$1" '
+    function done() { if (index(buf, "type: io.platform-mesh.iam.account.members") && index(buf, subject "\n")) last = buf }
+    /cloudevents.Event/ { done(); buf = "" }
+    { buf = buf $0 "\n" }
+    END { done(); printf "%s", last }' | sed '1,/^Data,/d'
+}
+# roles <account id> <user>: the user's roles in the last snapshot, as JSON.
+roles() { last_snapshot "$1" | jq -c --arg u "$2" '[.members[] | select(.user.id == $u) | .roles[]]'; }
 add_member() { "$ROOT/hack/add-member.sh" "$@" >/dev/null; }
 subscription_ready() { [[ $(admin get subscription $sub -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}') == True ]]; }
 
@@ -28,8 +40,10 @@ account_id=$(kcp "root:orgs:$ORG" get accountinfo account -o jsonpath='{.spec.or
 add_member --remove "$DEMO_USER" member
 sleep 10
 before=$(count granted)
+before_snapshots=$(snapshots)
 add_member "$DEMO_USER" member
 wait_for "membership.granted at the sink" 30 more_than granted "$before"
+wait_for "a members snapshot at the sink" 30 more_snapshots_than "$before_snapshots"
 event=$(last_event granted)
 grep -q "source: platform-mesh.io/orgs/$ORG/iam" <<<"$event" && pass "source" || fail "source missing"
 grep -q "subject: accounts/$account_id" <<<"$event" && pass "subject" || fail "subject missing"
@@ -37,6 +51,9 @@ grep -q "\"accountId\": \"$account_id\"" <<<"$event" && pass "accountId" || fail
 grep -q "pmorg: $ORG" <<<"$event" && pass "pmorg" || fail "pmorg missing"
 grep -q '"role": "member"' <<<"$event" && pass "role" || fail "role missing"
 grep -q "\"id\": \"$DEMO_USER\"" <<<"$event" && pass "user.id by the configured claim (email)" || fail "user missing"
+# The demo user created the org, so they are its owner, too.
+[[ $(roles "$account_id" "$DEMO_USER") == '["member","owner"]' ]] && pass "snapshot lists the new role" ||
+  fail "snapshot: $(roles "$account_id" "$DEMO_USER")"
 
 log "An invited user is announced the same way"
 invited=invited-$RANDOM@example.com
@@ -50,16 +67,20 @@ wait_for "membership.revoked for the invited user" 30 more_than revoked "$before
 
 log "Removing the role is announced"
 before=$(count revoked)
+before_snapshots=$(snapshots)
 add_member --remove "$DEMO_USER" member
 wait_for "membership.revoked at the sink" 30 more_than revoked "$before"
 grep -q "\"id\": \"$DEMO_USER\"" <<<"$(last_event revoked)" && pass "membership.revoked" || fail "revoked event wrong"
+wait_for "a members snapshot at the sink" 30 more_snapshots_than "$before_snapshots"
+[[ $(roles "$account_id" "$DEMO_USER") == '["owner"]' ]] && pass "snapshot without the removed role" ||
+  fail "snapshot: $(roles "$account_id" "$DEMO_USER")"
 
 log "Restarting the adapter does not publish again"
-total=$(($(count granted) + $(count revoked)))
+total=$(($(count granted) + $(count revoked) + $(snapshots)))
 kind_kubectl -n "$NS" rollout restart deploy/openfga-adapter >/dev/null
 kind_kubectl -n "$NS" rollout status deploy/openfga-adapter --timeout=120s >/dev/null
 sleep 15
-[[ $(($(count granted) + $(count revoked))) == "$total" ]] && pass "no duplicates" || fail "events published again"
+[[ $(($(count granted) + $(count revoked) + $(snapshots))) == "$total" ]] && pass "no duplicates" || fail "events published again"
 
 log "A new org is covered from its first change"
 neworg=e2e-org-$RANDOM
@@ -105,7 +126,11 @@ inner=$(kcp "root:orgs:$ORG:e2e-account" get accountinfo account -o jsonpath='{.
 announced() { grep -q "subject: accounts/$1" <<<"$(sink_logs | tail -n +$((seen + 1)))"; }
 wait_for "owner grant for the outer account" 30 announced "$outer" && pass "subject accounts/$outer"
 wait_for "owner grant for the inner account" 30 announced "$inner" && pass "subject accounts/$inner"
+owner_listed() { [[ $(roles "$inner" "$DEMO_USER") == '["owner"]' ]]; }
+wait_for "a snapshot of the inner account" 30 owner_listed && pass "snapshot of the inner account"
 kcp "root:orgs:$ORG:e2e-account" delete account e2e-account --wait=false >/dev/null
+no_members() { [[ $(last_snapshot "$inner" | jq -c .members) == "[]" ]]; }
+wait_for "an empty snapshot of the deleted account" 120 no_members && pass "deleted account: empty snapshot"
 kcp "root:orgs:$ORG" delete account e2e-account --wait=false >/dev/null
 
 log "A Subscription limited to other orgs gets nothing"
