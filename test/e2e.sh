@@ -172,6 +172,60 @@ code=$(curl -sk -o /dev/null -w '%{http_code}' --resolve "$host:$PORT:$INGRESS_A
   -X POST "https://$host:$PORT/" -H "Ce-Id: forged" -H "Ce-Specversion: 1.0" -H "Ce-Type: t" -H "Ce-Source: s" -d '{}')
 [[ $code == 401 ]] && pass "Gateway route reaches the ingress (401 without token)" || fail "Gateway route: $code"
 
+log "Replies from a sink don't reach other subscribers"
+# A sink that answers every snapshot with a forged grant. Knative takes such an
+# answer as a reply and sends it to the broker, which must not accept it. The
+# sink doesn't get grants itself, so a reply that gets through can't loop.
+forged=forged-reply-$RANDOM
+kind_kubectl apply -f - >/dev/null <<YAML
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: reply-sink, namespace: eventing-demo-sink}
+data:
+  reply: |
+    #!/bin/sh
+    cat >/dev/null
+    printf 'Content-Type: application/json\r\nCe-Id: $forged\r\nCe-Specversion: 1.0\r\nCe-Type: io.platform-mesh.iam.membership.granted.v1alpha1\r\nCe-Source: platform-mesh.io/orgs/$ORG/iam\r\nCe-Pmorg: $ORG\r\n\r\n{"org": "$ORG", "user": {"id": "$forged@example.com"}}'
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: reply-sink, namespace: eventing-demo-sink, labels: {app: reply-sink}}
+spec:
+  containers:
+    - name: httpd
+      image: busybox:1.36
+      command: [sh, -c, "mkdir -p /www/cgi-bin && cp /cgi/reply /www/cgi-bin/ && chmod +x /www/cgi-bin/reply && httpd -f -p 8080 -h /www"]
+      volumeMounts: [{name: cgi, mountPath: /cgi}]
+  volumes: [{name: cgi, configMap: {name: reply-sink}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: reply-sink, namespace: eventing-demo-sink}
+spec:
+  selector: {app: reply-sink}
+  ports: [{port: 80, targetPort: 8080}]
+YAML
+kind_kubectl -n eventing-demo-sink wait --for=condition=Ready pod/reply-sink --timeout=120s >/dev/null
+admin apply -f - >/dev/null <<YAML
+apiVersion: eventing.platform-mesh.io/v1alpha1
+kind: Subscription
+metadata: {name: e2e-replies}
+spec:
+  filter: {types: [io.platform-mesh.iam.account.members.v1alpha1]}
+  sink: {uri: http://reply-sink.eventing-demo-sink.svc.cluster.local/cgi-bin/reply}
+YAML
+reply_ready() { [[ $(admin get subscription e2e-replies -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}') == True ]]; }
+wait_for "reply Subscription ready" 60 reply_ready
+sleep 5
+before=$(snapshots)
+add_member "$DEMO_USER" member
+wait_for "the snapshot at event-display" 30 more_snapshots_than "$before"
+sleep 20
+[[ $(sink_logs | grep -c "id: $forged" || true) == 0 ]] && pass "forged reply blocked" || fail "a forged reply reached event-display"
+add_member --remove "$DEMO_USER" member
+admin delete subscription e2e-replies --timeout=60s >/dev/null
+kind_kubectl -n eventing-demo-sink delete pod/reply-sink svc/reply-sink cm/reply-sink --wait=false >/dev/null
+
 log "No events after the Subscription is deleted"
 admin delete subscription $sub --timeout=60s >/dev/null
 before=$(count granted)
