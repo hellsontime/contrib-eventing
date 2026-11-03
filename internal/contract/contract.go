@@ -37,8 +37,11 @@ type Membership struct {
 	Account string `json:"account"`
 	// AccountID is unique in the platform, unlike the name of a nested account.
 	AccountID string `json:"accountId"`
-	Role      string `json:"role"`
-	User      User   `json:"user"`
+	// AccountPath is the account's kcp workspace path. Empty if the workspace
+	// was gone before the event was built.
+	AccountPath string `json:"accountPath,omitempty"`
+	Role        string `json:"role"`
+	User        User   `json:"user"`
 }
 
 // Member is a user and every role they have on an account.
@@ -49,10 +52,11 @@ type Member struct {
 
 // AccountMembers is the full member list of an account.
 type AccountMembers struct {
-	Org       string   `json:"org"`
-	Account   string   `json:"account"`
-	AccountID string   `json:"accountId"`
-	Members   []Member `json:"members"`
+	Org         string   `json:"org"`
+	Account     string   `json:"account"`
+	AccountID   string   `json:"accountId"`
+	AccountPath string   `json:"accountPath,omitempty"`
+	Members     []Member `json:"members"`
 }
 
 // AccountID is the logical cluster of the workspace that holds the Account

@@ -25,6 +25,11 @@ func TestMembershipChanged(t *testing.T) {
 	assert.Equal(t, "acme", e.Extensions()[OrgExtension])
 	assert.JSONEq(t, `{"org":"acme","account":"team-a","accountId":"c1/team-a","role":"member","user":{"id":"alice@example.com"}}`, string(e.Data()))
 
+	m.AccountPath = "root:orgs:acme:team-a"
+	withPath, _ := MembershipChanged(true, m, "change-1", time.Unix(0, 0))
+	assert.Contains(t, string(withPath.Data()), `"accountPath":"root:orgs:acme:team-a"`)
+	m.AccountPath = ""
+
 	again, _ := MembershipChanged(true, m, "change-1", time.Unix(0, 0))
 	other, _ := MembershipChanged(true, Membership{Org: "other"}, "change-1", time.Unix(0, 0))
 	assert.Equal(t, e.ID(), again.ID(), "same change, same id")
