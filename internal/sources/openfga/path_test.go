@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/stretchr/testify/assert"
@@ -19,135 +20,164 @@ import (
 
 	"go.platform-mesh.io/golang-commons/logger/testlogger"
 
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/rest"
 )
 
-// fakeKCP serves the APIExportEndpointSlice and, behind its virtual
-// workspace, AccountInfos and Accounts by cluster id. Unknown clusters get 403,
-// like through the real virtual workspace.
+// fakeKCP serves the APIExportEndpointSlice. The watches behind its endpoints
+// are stubbed: tests hand AccountInfos to the paths directly, the way the
+// watch's event handler does.
 type fakeKCP struct {
 	srv *httptest.Server
-	// infos is the AccountInfo path per cluster, accounts the Account types.
-	infos    map[string]string
-	accounts map[string]string // cluster/name -> type
-	broken   bool
-	requests int
-	// export is the id in the virtual workspace URL; the slice names it.
-	export     string
-	sliceReads int
+	// exports are the ids in the virtual workspace URLs, one per shard.
+	exports []string
+	broken  bool
+	reads   int
+	// watched are the endpoints a watch was started for, synced whether they
+	// have seen all AccountInfos.
+	watched []string
+	synced  bool
 }
 
 func (f *fakeKCP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path == "/clusters/root:platform-mesh-system/apis/apis.kcp.io/v1alpha1/apiexportendpointslices/core.platform-mesh.io" {
-		f.sliceReads++
-		_, _ = fmt.Fprintf(w, `{"status": {"endpoints": [{"url": "%s/services/apiexport/%s/core.platform-mesh.io"}]}}`, f.srv.URL, f.export)
+	if r.URL.Path != "/clusters/root:platform-mesh-system/apis/apis.kcp.io/v1alpha1/apiexportendpointslices/core.platform-mesh.io" || f.broken {
+		http.Error(w, "nope", http.StatusInternalServerError)
 		return
 	}
-	f.requests++
-	vwPrefix := "/services/apiexport/" + f.export + "/core.platform-mesh.io/clusters/"
-	if f.broken {
-		http.Error(w, "etcd down", http.StatusInternalServerError)
-		return
+	f.reads++
+	urls := make([]string, 0, len(f.exports))
+	for _, e := range f.exports {
+		urls = append(urls, fmt.Sprintf(`{"url": "%s/services/apiexport/%s/core.platform-mesh.io"}`, f.srv.URL, e))
 	}
-	cluster, resource, ok := strings.Cut(strings.TrimPrefix(r.URL.Path, vwPrefix), "/apis/core.platform-mesh.io/v1alpha1/")
-	if !strings.HasPrefix(r.URL.Path, vwPrefix) || !ok {
-		http.NotFound(w, r)
-		return
-	}
-	if _, known := f.infos[cluster]; !known && cluster != "c-orgs" {
-		http.Error(w, "access denied", http.StatusForbidden)
-		return
-	}
-	switch {
-	case resource == "accountinfos/account" && f.infos[cluster] != "":
-		_, _ = fmt.Fprintf(w, `{"spec": {"account": {"path": %q}}}`, f.infos[cluster])
-	case strings.HasPrefix(resource, "accounts/") && f.accounts[cluster+"/"+strings.TrimPrefix(resource, "accounts/")] != "":
-		_, _ = fmt.Fprintf(w, `{"spec": {"type": %q}}`, f.accounts[cluster+"/"+strings.TrimPrefix(resource, "accounts/")])
-	default:
-		http.NotFound(w, r)
-	}
+	_, _ = fmt.Fprintf(w, `{"status": {"endpoints": [%s]}}`, strings.Join(urls, ","))
 }
 
-func newFakeKCP(t *testing.T) (*fakeKCP, *PathResolver) {
-	f := &fakeKCP{
-		infos:    map[string]string{"c-acme": "root:orgs:acme", "c-team-a": "root:orgs:acme:team-a"},
-		accounts: map[string]string{"c-orgs/acme": "org", "c-acme/team-a": "account"},
-		export:   "c-core",
-	}
+// newFakeKCP returns paths that know nothing yet, at a fixed time.
+func newFakeKCP(t *testing.T) (*fakeKCP, *AccountPaths, *time.Time) {
+	f := &fakeKCP{exports: []string{"c-core"}, synced: true}
 	f.srv = httptest.NewServer(f)
 	t.Cleanup(f.srv.Close)
-	return f, &PathResolver{
+	now := time.Date(2026, 10, 23, 13, 0, 0, 0, time.UTC)
+	p := &AccountPaths{
 		Config:        &rest.Config{Host: f.srv.URL + "/clusters/root:platform-mesh-system/"},
 		EndpointSlice: "core.platform-mesh.io",
+		Grace:         time.Minute,
+		Log:           testlogger.New().HideLogOutput().Logger,
+		watch: func(_ context.Context, endpoint string) (func() bool, error) {
+			f.watched = append(f.watched, endpoint)
+			return func() bool { return f.synced }, nil
+		},
+		now: func() time.Time { return now },
 	}
+	require.NoError(t, p.Start(context.Background()))
+	return f, p, &now
 }
 
-func TestPathResolver(t *testing.T) {
-	f, r := newFakeKCP(t)
+// accountInfo is an AccountInfo as the watch hands it over.
+func accountInfo(cluster, name, path string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "core.platform-mesh.io/v1alpha1",
+		"kind":       "AccountInfo",
+		"metadata":   map[string]any{"name": "account"},
+		"spec": map[string]any{"account": map[string]any{
+			"name": name, "originClusterId": cluster, "path": path,
+		}},
+	}}
+}
+
+func TestAccountPaths(t *testing.T) {
+	f, p, _ := newFakeKCP(t)
 	ctx := context.Background()
 
-	path, err := r.Path(ctx, "c-orgs", "acme")
-	require.NoError(t, err)
-	assert.Equal(t, "root:orgs:acme", path, "org accounts live in root:orgs")
+	// Orgs and nested accounts alike: each has its own AccountInfo.
+	p.add(accountInfo("c-orgs", "acme", "root:orgs:acme"))
+	p.add(accountInfo("c-acme", "team-a", "root:orgs:acme:team-a"))
+	p.add(accountInfo("c-team-a", "team-a", "root:orgs:acme:team-a:team-a"))
+	for id, want := range map[[2]string]string{
+		{"c-orgs", "acme"}:     "root:orgs:acme",
+		{"c-acme", "team-a"}:   "root:orgs:acme:team-a",
+		{"c-team-a", "team-a"}: "root:orgs:acme:team-a:team-a",
+	} {
+		path, err := p.Path(ctx, id[0], id[1])
+		require.NoError(t, err)
+		assert.Equal(t, want, path, id)
+	}
+	assert.Empty(t, f.watched, "known accounts need no endpoints")
 
-	path, err = r.Path(ctx, "c-acme", "team-a")
+	// An AccountInfo without the fields we need is ignored.
+	p.add(accountInfo("c-acme", "", "root:orgs:acme:nameless"))
+	assert.Len(t, p.paths, 3)
+}
+
+func TestAccountPathsUnknown(t *testing.T) {
+	f, p, now := newFakeKCP(t)
+	ctx := context.Background()
+
+	// Until every watch has seen all AccountInfos, nothing is decided.
+	f.synced = false
+	_, err := p.Path(ctx, "c-acme", "team-a")
+	require.ErrorContains(t, err, "not loaded yet")
+	assert.Equal(t, []string{f.srv.URL + "/services/apiexport/c-core/core.platform-mesh.io"}, f.watched)
+
+	// A new account whose AccountInfo hasn't arrived yet: try again later.
+	f.synced = true
+	_, err = p.Path(ctx, "c-acme", "team-a")
+	require.ErrorContains(t, err, "no AccountInfo for account c-acme/team-a yet")
+	assert.Equal(t, 1, f.reads, "the slice is read again only after a while")
+	*now = now.Add(30 * time.Second)
+	p.add(accountInfo("c-acme", "team-a", "root:orgs:acme:team-a"))
+	path, err := p.Path(ctx, "c-acme", "team-a")
 	require.NoError(t, err)
 	assert.Equal(t, "root:orgs:acme:team-a", path)
 
-	path, err = r.Path(ctx, "c-team-a", "team-a")
-	require.NoError(t, err)
-	assert.Equal(t, "root:orgs:acme:team-a:team-a", path, "nested accounts can share a name")
-
-	// Paths are cached by cluster: another account in a known workspace needs no request.
-	before := f.requests
-	path, err = r.Path(ctx, "c-acme", "team-b")
-	require.NoError(t, err)
-	assert.Equal(t, "root:orgs:acme:team-b", path)
-	assert.Equal(t, before, f.requests)
-
-	// A workspace that is gone has no path.
-	path, err = r.Path(ctx, "c-gone", "team-x")
-	require.NoError(t, err)
-	assert.Empty(t, path)
-
-	// A workspace without AccountInfo is root:orgs only if it holds an org Account.
-	_, fresh := newFakeKCP(t)
-	path, err = fresh.Path(ctx, "c-orgs", "not-an-org")
-	require.NoError(t, err)
-	assert.Empty(t, path)
-
-	// Other errors are returned, so the page is read again later.
-	f.broken = true
-	_, err = r.Path(ctx, "c-other", "team-a")
+	// An account that never shows up was deleted before we saw it: no path
+	// once the grace period is over.
+	_, err = p.Path(ctx, "c-acme", "gone")
 	require.Error(t, err)
+	*now = now.Add(time.Minute)
+	path, err = p.Path(ctx, "c-acme", "gone")
+	require.NoError(t, err)
+	assert.Empty(t, path)
 }
 
-func TestPathResolverEndpointsChange(t *testing.T) {
-	f, r := newFakeKCP(t)
+func TestAccountPathsEndpointsChange(t *testing.T) {
+	f, p, now := newFakeKCP(t)
 	ctx := context.Background()
 
-	_, err := r.Path(ctx, "c-acme", "team-a")
-	require.NoError(t, err)
-	require.Equal(t, 1, f.sliceReads)
+	_, err := p.Path(ctx, "c-acme", "team-a")
+	require.Error(t, err)
+	require.Len(t, f.watched, 1)
 
-	// The endpoint moved: the old URL knows no cluster any more. The slice is
-	// read again and the new endpoint answers.
-	f.export = "c-moved"
-	path, err := r.Path(ctx, "c-team-a", "team-a")
-	require.NoError(t, err)
-	assert.Equal(t, "root:orgs:acme:team-a:team-a", path)
-	assert.Equal(t, 2, f.sliceReads)
+	// A shard was added. The next unknown account after a while reads the
+	// slice again, and the new endpoint is watched as well.
+	f.exports = append(f.exports, "c-shard-2")
+	*now = now.Add(endpointsReload)
+	_, err = p.Path(ctx, "c-shard-2-ws", "team-b")
+	require.Error(t, err)
+	assert.Equal(t, 2, f.reads)
+	assert.Equal(t, []string{
+		f.srv.URL + "/services/apiexport/c-core/core.platform-mesh.io",
+		f.srv.URL + "/services/apiexport/c-shard-2/core.platform-mesh.io",
+	}, f.watched)
 
-	// A gone workspace reads the slice again for both lookups (AccountInfo,
-	// then Account), finds it unchanged and stays gone.
-	path, err = r.Path(ctx, "c-gone", "team-x")
-	require.NoError(t, err)
-	assert.Empty(t, path)
-	assert.Equal(t, 4, f.sliceReads)
+	// If the slice can't be read again, the watches so far go on.
+	f.broken = true
+	*now = now.Add(endpointsReload)
+	_, err = p.Path(ctx, "c-x", "team-x")
+	require.ErrorContains(t, err, "no AccountInfo")
+}
+
+func TestAccountPathsNoSlice(t *testing.T) {
+	f, p, _ := newFakeKCP(t)
+	f.broken = true
+	_, err := p.Path(context.Background(), "c-acme", "team-a")
+	require.ErrorContains(t, err, "APIExportEndpointSlice core.platform-mesh.io")
+	assert.Empty(t, f.watched)
 }
 
 func TestPublishWithPaths(t *testing.T) {
-	_, paths := newFakeKCP(t)
+	_, paths, _ := newFakeKCP(t)
+	paths.add(accountInfo("c-acme", "team-a", "root:orgs:acme:team-a"))
 	fga := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/read") {
 			_, _ = w.Write([]byte(`{"tuples": []}`))

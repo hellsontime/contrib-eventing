@@ -136,6 +136,10 @@ path=$(last_snapshot "$inner" | jq -r .accountPath)
 kcp "root:orgs:$ORG:e2e-account" delete account e2e-account --wait=false >/dev/null
 no_members() { [[ $(last_snapshot "$inner" | jq -c .members) == "[]" ]]; }
 wait_for "an empty snapshot of the deleted account" 120 no_members && pass "deleted account: empty snapshot"
+# Its AccountInfo is gone by now, but the path seen before stays.
+path=$(last_snapshot "$inner" | jq -r .accountPath)
+[[ $path == "root:orgs:$ORG:e2e-account:e2e-account" ]] && pass "deleted account keeps its accountPath" ||
+  fail "deleted account accountPath: $path"
 kcp "root:orgs:$ORG" delete account e2e-account --wait=false >/dev/null
 
 log "A Subscription limited to other orgs gets nothing"

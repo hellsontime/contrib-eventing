@@ -71,7 +71,10 @@ func runOpenFGAAdapter(_ *cobra.Command, _ []string) { // coverage-ignore
 		if err != nil {
 			log.Fatal().Err(err).Msg("unable to load core kubeconfig")
 		}
-		a.Paths = &openfga.PathResolver{Config: coreCfg, EndpointSlice: cfg.CoreEndpointSlice}
+		a.Paths = &openfga.AccountPaths{Config: coreCfg, EndpointSlice: cfg.CoreEndpointSlice, Grace: time.Minute, Log: log}
+		if err := a.Paths.Start(ctx); err != nil {
+			log.Fatal().Err(err).Msg("unable to watch account paths")
+		}
 	}
 	log.Info().Str("openfga", cfg.OpenFGAURL).Bool("accountPaths", a.Paths != nil).Msg("starting adapter")
 	if err := a.Run(ctx); err != nil {

@@ -35,8 +35,8 @@ const (
 // gives each org a store named like the org.
 type Adapter struct {
 	FGA *Client
-	// Paths finds account paths. Without it events have no accountPath.
-	Paths *PathResolver
+	// Paths knows account paths. Without it events have no accountPath.
+	Paths *AccountPaths
 	// SkipStores are stores that do not belong to an org.
 	SkipStores []string
 	Kube       ctrlruntimeclient.Client
