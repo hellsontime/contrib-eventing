@@ -100,6 +100,10 @@ to a single snapshot.
 
 - **Keep the newest.** Snapshots can arrive in any order; use the one with the
   latest `time`.
+- **Same id, same list.** A retried snapshot keeps its `id` only if the list is
+  the same. If the members changed in between, it is a new event with a new `id`.
+- **Explicit roles only.** A role given to everyone (`user:*`) is not listed,
+  and owners are not listed as members unless they also have the member role.
 - **An empty list** means the account has no members, for example after it was
   deleted.
 - **No names.** The list has user ids only.

@@ -10,6 +10,7 @@ package contract
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"strings"
 	"time"
 
@@ -76,15 +77,20 @@ func MembershipChanged(granted bool, m Membership, changeKey string, at time.Tim
 	return newEvent(typ, m.Org, m.AccountID, id(m.Org, changeKey), at, m)
 }
 
-// MembersSnapshot builds a members event. changeKey identifies the last change
-// that led to it, so a retry gives the same event id. at is when the list was
-// read.
+// MembersSnapshot builds a members event. at is when the list was read. The id
+// comes from changeKey, the last change that led to it, and from the list: a
+// retry gives the same id, unless the list changed in between, because then it
+// is another event.
 func MembersSnapshot(m AccountMembers, changeKey string, at time.Time) (cloudevents.Event, error) {
 	if m.Members == nil {
 		// An account without members has an empty list, not null.
 		m.Members = []Member{}
 	}
-	return newEvent(TypeAccountMembers, m.Org, m.AccountID, id(m.Org, TypeAccountMembers, changeKey), at, m)
+	data, err := json.Marshal(m)
+	if err != nil {
+		return cloudevents.Event{}, err
+	}
+	return newEvent(TypeAccountMembers, m.Org, m.AccountID, id(m.Org, TypeAccountMembers, changeKey, string(data)), at, m)
 }
 
 func newEvent(typ, org, accountID, eventID string, at time.Time, data any) (cloudevents.Event, error) {

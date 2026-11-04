@@ -56,7 +56,10 @@ func TestMembersSnapshot(t *testing.T) {
 	change, _ := MembershipChanged(true, Membership{Org: "acme"}, "change-1", time.Unix(0, 0))
 	assert.NotEqual(t, change.ID(), e.ID(), "a snapshot and the change it follows have different ids")
 	again, _ := MembersSnapshot(m, "change-1", time.Unix(1, 0))
-	assert.Equal(t, e.ID(), again.ID(), "same last change, same id")
+	assert.Equal(t, e.ID(), again.ID(), "same last change and list, same id")
+	m.Members = append(m.Members, Member{User: User{ID: "bob@example.com"}, Roles: []string{"member"}})
+	changed, _ := MembersSnapshot(m, "change-1", time.Unix(1, 0))
+	assert.NotEqual(t, e.ID(), changed.ID(), "a retry that reads another list is another event")
 
 	empty, err := MembersSnapshot(AccountMembers{Org: "acme"}, "change-2", time.Unix(0, 0))
 	require.NoError(t, err)
