@@ -45,6 +45,12 @@ var tuples = map[string][]TupleKey{
 		{User: "role:core_platform-mesh_io_account/c1/team-a/owner#assignee", Relation: "owner", Object: "core_platform-mesh_io_account:c1/team-a"},
 		{User: "role:core_platform-mesh_io_account/c1/team-a/member#assignee", Relation: "member", Object: "core_platform-mesh_io_account:c1/team-a"},
 		{User: "core_platform-mesh_io_account:c0/acme", Relation: "parent", Object: "core_platform-mesh_io_account:c1/team-a"},
+		// A role of another account. The model allows it, Platform Mesh doesn't
+		// write it; its assignees are not listed as members here.
+		{User: "role:core_platform-mesh_io_account/c9/other/owner#assignee", Relation: "owner", Object: "core_platform-mesh_io_account:c1/team-a"},
+	},
+	"role:core_platform-mesh_io_account/c9/other/owner": {
+		{User: "user:mallory@example.com", Relation: "assignee", Object: "role:core_platform-mesh_io_account/c9/other/owner"},
 	},
 	"role:core_platform-mesh_io_account/c1/team-a/owner": {
 		{User: "user:bob@example.com", Relation: "assignee", Object: "role:core_platform-mesh_io_account/c1/team-a/owner"},
@@ -52,6 +58,7 @@ var tuples = map[string][]TupleKey{
 	},
 	"role:core_platform-mesh_io_account/c1/team-a/member": {
 		{User: "user:alice@example.com", Relation: "assignee", Object: "role:core_platform-mesh_io_account/c1/team-a/member"},
+		// Everyone; a list of user ids can't say that, so it is left out.
 		{User: "user:*", Relation: "assignee", Object: "role:core_platform-mesh_io_account/c1/team-a/member"},
 	},
 }
@@ -150,6 +157,55 @@ func TestPublishNew(t *testing.T) {
 	assert.Equal(t, contract.TypeAccountMembers, published[4].Type())
 	assert.JSONEq(t, `{"org":"acme","account":"team-a","accountId":"c2/team-a","members":[]}`, string(published[4].Data()))
 	assert.NotEqual(t, published[3].ID(), published[4].ID())
+}
+
+// The ingress took a snapshot but its answer got lost, and the members changed
+// before the retry. The retried snapshot is another event and gets another id;
+// the changes keep theirs.
+func TestSnapshotRetryWithOtherMembers(t *testing.T) {
+	owners := "role:core_platform-mesh_io_account/c1/team-a/owner"
+	saved := tuples[owners]
+	t.Cleanup(func() { tuples[owners] = saved })
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/read") {
+			serveRead(t, w, r)
+			return
+		}
+		if r.URL.Query().Get("continuation_token") == "after-page" {
+			_, _ = w.Write([]byte(`{"changes": [], "continuation_token": "after-page"}`))
+			return
+		}
+		_, _ = w.Write([]byte(threeChanges))
+	}))
+	defer srv.Close()
+
+	var published []cloudevents.Event
+	lostAt := 3
+	a := &Adapter{
+		FGA: &Client{BaseURL: srv.URL, HTTP: srv.Client()},
+		Log: testlogger.New().HideLogOutput().Logger,
+		Publish: func(_ context.Context, e cloudevents.Event) error {
+			published = append(published, e)
+			if len(published) == lostAt+1 {
+				return errors.New("answer lost")
+			}
+			return nil
+		},
+	}
+	st := orgState{StoreID: "store-1", Since: time.Now()}
+	_, err := a.publishNew(context.Background(), "acme", &st)
+	require.Error(t, err)
+	firstTry := published
+
+	tuples[owners] = saved[:1]
+	lostAt, published = -1, nil
+	_, err = a.publishNew(context.Background(), "acme", &st)
+	require.NoError(t, err)
+	for i := range 3 {
+		assert.Equal(t, firstTry[i].ID(), published[i].ID(), "changes keep their ids")
+	}
+	assert.Equal(t, contract.TypeAccountMembers, published[3].Type())
+	assert.NotEqual(t, firstTry[3].ID(), published[3].ID(), "another list, another snapshot id")
 }
 
 // fakeFGA serves a list of stores and answers every changelog request with no
