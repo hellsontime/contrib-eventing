@@ -128,6 +128,16 @@ func TestCheckSinks(t *testing.T) {
 		sub("http://event-display.demo.svc.cluster.local.example.com", ""),
 		sub("http://a.consumer.svc.cluster.local", "http://example.com"),
 		sub("http://", ""),
+		// The host is what the request goes to, not what the URL starts with.
+		sub("http://event-display.demo.svc.cluster.local@example.com", ""),
+		sub("http://example.com#@event-display.demo.svc.cluster.local", ""),
+		sub("http://example.com?@event-display.demo.svc.cluster.local", ""),
+		sub(`http://example.com\@event-display.demo.svc.cluster.local`, ""),
+		sub("http://event%2Ddisplay.demo.svc.cluster.local", ""),
+		sub("http://10.96.0.1", ""),
+		sub("http://[::1]:80", ""),
+		// Strict: a trailing dot names the same host but isn't on the list.
+		sub("http://event-display.demo.svc.cluster.local.", ""),
 	} {
 		assert.Error(t, checkSinks(bad, allowed), bad.Spec.Sink.URI)
 	}
