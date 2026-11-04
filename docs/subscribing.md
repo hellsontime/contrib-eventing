@@ -27,7 +27,8 @@ The rules that matter:
   domain). Events carry user ids, so the operator decides where they may go.
   Otherwise the Subscription stays `Ready=False` with reason `SinkNotAllowed`.
   The same goes for the dead letter sink. The local install allows
-  `*.eventing-demo-sink.svc.cluster.local`.
+  `*.eventing-demo-sink.svc.cluster.local`. Redirects are followed, so don't
+  answer with one unless you mean to pass the events on.
 
 ## 2. Create a Subscription
 
@@ -81,3 +82,5 @@ Subscription stops delivery.
 ## Limits
 
 - Events are kept for a day at most. A sink that is down longer misses them.
+- Two Subscriptions with the same sink deliver each event twice, with the same
+  `id`.

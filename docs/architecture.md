@@ -55,7 +55,7 @@ The module does not change Platform Mesh components. It needs:
 - an APIExport for the Subscription API, bound in its own workspace;
 - read access to the OpenFGA changelog and tuples;
 - read access to `AccountInfo` through the `core.platform-mesh.io` export, for account paths: a provider connection like the one iam-service gets;
-- Knative Eventing and its NATS JetStream channel in the cluster, used by eventing only. A NetworkPolicy lets only our ingress reach Knative's broker ingress, and that ingress is shared by every broker in the cluster;
+- Knative Eventing and its NATS JetStream channel in the cluster, used by eventing only. NetworkPolicies let only our ingress reach Knative's broker ingress, only the broker ingress reach the channel, and only the channel reach the broker filter. These parts are shared by every broker in the cluster;
 - an HTTPRoute on the platform's Gateway, so publishers outside the cluster can reach the ingress.
 
 If eventing is not installed, Platform Mesh works exactly as before.
@@ -72,7 +72,8 @@ If eventing is not installed, Platform Mesh works exactly as before.
 
 These came out of the [spike](https://github.com/platform-mesh/backlog/issues/421) and are open work:
 
-- The Knative broker ingress accepts any event from inside the cluster, which is why our own ingress sits in front of it. A NetworkPolicy lets only our ingress reach the broker ingress.
+- The Knative broker ingress, the channel and the broker filter accept any event from inside the cluster, which is why our own ingress sits in front of them. NetworkPolicies let only our ingress reach the broker ingress, only the broker ingress reach the channel, and only the channel reach the filter.
+- The allowlist checks the sink's URL. Knative follows redirects, and a 307 or 308 sends the event on to another host. That is no different from a sink that forwards events itself: the allowlist decides who gets events first-hand.
 - The ingress accepts only the platform's own adapters so far. Providers publishing events for their orgs is not built yet.
 - Replies are blocked by the same NetworkPolicy. If a subscriber answers with a CloudEvent, Knative's broker filter tries to send it to the broker ingress, which doesn't let it in; the filter retries for a while and drops it. Knative OIDC with an EventPolicy per broker would reject replies properly, but it is alpha and switched on for the whole cluster.
 - The ingress is reachable at `eventing.services.<domain>` through the `terminate-services` listener of the platform Gateway. In the kind setup the platform certificate covers `*.<domain>` but not `*.services.<domain>`, so that host gets Traefik's default certificate.
