@@ -33,6 +33,12 @@ const (
 	// publishes the event again to everyone. Knative copies the annotation from
 	// the Broker to the channel when it creates the channel.
 	asyncHandlerAnnotation = "messaging.knative.dev/async-handler"
+
+	// The backoff of Knative's default Broker config. A Trigger with its own
+	// delivery replaces the Broker's delivery as a whole, and the JetStream
+	// dispatcher crashes on a retry without backoff, so we always set both.
+	defaultBackoffPolicy = "exponential"
+	defaultBackoffDelay  = "PT0.2S"
 )
 
 var (
@@ -92,7 +98,8 @@ func (b *Backend) ensureBroker(ctx context.Context) error {
 // triggerSpec translates a Subscription into a Trigger spec. Knative delivers
 // an event only if every filter matches: one for the types, one for the orgs.
 // Triggers cannot tell replies apart, so replies are blocked in front of the
-// Broker (see the NetworkPolicy in config/deploy/eventing.yaml).
+// Broker (see the NetworkPolicy in config/deploy/eventing.yaml). Without a
+// delivery the Trigger takes the Broker's, which is complete.
 func triggerSpec(sub *v1alpha1.Subscription) map[string]any {
 	filters := []any{anyOf("type", sub.Spec.Filter.Types)}
 	if len(sub.Spec.Filter.Orgs) > 0 {
@@ -104,7 +111,10 @@ func triggerSpec(sub *v1alpha1.Subscription) map[string]any {
 		"subscriber": map[string]any{"uri": sub.Spec.Sink.URI},
 	}
 	if d := sub.Spec.Delivery; d != nil {
-		delivery := map[string]any{}
+		delivery := map[string]any{
+			"backoffPolicy": defaultBackoffPolicy,
+			"backoffDelay":  defaultBackoffDelay,
+		}
 		if d.Retry != nil {
 			delivery["retry"] = int64(*d.Retry)
 		}

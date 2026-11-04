@@ -33,8 +33,28 @@ func TestTriggerSpec(t *testing.T) {
 			map[string]any{"exact": map[string]any{"type": "b"}},
 		}}},
 		"subscriber": map[string]any{"uri": "http://sink"},
-		"delivery":   map[string]any{"retry": int64(3)},
+		"delivery": map[string]any{
+			"retry":         int64(3),
+			"backoffPolicy": "exponential",
+			"backoffDelay":  "PT0.2S",
+		},
 	}, triggerSpec(sub))
+}
+
+func TestTriggerSpecBackoff(t *testing.T) {
+	policy, delay := "linear", "PT1S"
+	sub := &v1alpha1.Subscription{Spec: v1alpha1.SubscriptionSpec{
+		Filter: v1alpha1.Filter{Types: []string{"a"}},
+		Sink:   v1alpha1.Sink{URI: "http://sink"},
+	}}
+	// No delivery: the Trigger takes the Broker's.
+	assert.NotContains(t, triggerSpec(sub), "delivery")
+
+	// A delivery always has a backoff, the Subscription's or the default.
+	sub.Spec.Delivery = &v1alpha1.Delivery{}
+	assert.Equal(t, map[string]any{"backoffPolicy": "exponential", "backoffDelay": "PT0.2S"}, triggerSpec(sub)["delivery"])
+	sub.Spec.Delivery = &v1alpha1.Delivery{BackoffPolicy: &policy, BackoffDelay: &delay}
+	assert.Equal(t, map[string]any{"backoffPolicy": "linear", "backoffDelay": "PT1S"}, triggerSpec(sub)["delivery"])
 }
 
 func TestTriggerSpecDeadLetters(t *testing.T) {
@@ -48,6 +68,8 @@ func TestTriggerSpecDeadLetters(t *testing.T) {
 		},
 	}}
 	assert.Equal(t, map[string]any{
+		"backoffPolicy":  "exponential",
+		"backoffDelay":   "PT0.2S",
 		"timeout":        "PT10S",
 		"deadLetterSink": map[string]any{"uri": "http://dead-letters"},
 	}, triggerSpec(sub)["delivery"])
