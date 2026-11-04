@@ -22,7 +22,7 @@ kcp root:providers:eventing delete subscriptions --all --timeout=60s >/dev/null 
 log "Removing the components and the broker"
 kind_kubectl delete ns "$NS" eventing-demo-sink --ignore-not-found --wait=false >/dev/null
 kind_kubectl delete clusterrolebinding contrib-eventing-ingress-auth-delegator --ignore-not-found >/dev/null
-kind_kubectl -n knative-eventing delete networkpolicy contrib-eventing-broker-ingress --ignore-not-found >/dev/null 2>&1 || true
+kind_kubectl -n knative-eventing delete networkpolicy contrib-eventing-broker-ingress contrib-eventing-channel contrib-eventing-broker-filter --ignore-not-found >/dev/null 2>&1 || true
 
 # The provider connections have to go before the export. The platform-mesh-operator
 # stops at the first connection it cannot handle.

@@ -156,10 +156,16 @@ probe() {
   kind_kubectl -n default run "e2e-probe-$RANDOM" --rm -i --restart=Never --quiet --image=curlimages/curl:8.5.0 --command -- \
     curl -s -m 5 -o /dev/null -w '%{http_code}' -X POST "$1" -H "Ce-Id: forged" -H "Ce-Specversion: 1.0" \
     -H "Ce-Type: io.platform-mesh.iam.membership.granted.v1alpha1" -H "Ce-Source: forged" -H "Ce-Pmorg: $ORG" \
-    -H "Content-Type: application/json" ${2:+-H "Authorization: Bearer $2"} -d '{}' 2>/dev/null || true
+    -H "Ce-Knativebrokerttl: 255" -H "Content-Type: application/json" ${2:+-H "Authorization: Bearer $2"} -d '{}' 2>/dev/null || true
 }
 code=$(probe "http://broker-ingress.knative-eventing.svc.cluster.local/$NS/default")
 [[ $code != 202 ]] && pass "direct post to the broker is blocked" || fail "broker accepted a forged event"
+# Behind the broker ingress: the channel, and the filter that delivers to a Trigger.
+code=$(probe "$(kind_kubectl -n "$NS" get natsjetstreamchannel default-kne-trigger -o jsonpath='{.status.address.url}')")
+[[ $code != 202 ]] && pass "direct post to the channel is blocked" || fail "channel accepted a forged event"
+trigger=$(kind_kubectl -n "$NS" get triggers -o jsonpath='{.items[0].metadata.name}/{.items[0].metadata.uid}')
+code=$(probe "http://broker-filter.knative-eventing.svc.cluster.local/triggers/$NS/$trigger")
+[[ $code != 200 && $code != 202 ]] && pass "direct post to the broker filter is blocked" || fail "broker filter accepted a forged event"
 code=$(probe http://ingress.contrib-eventing.svc.cluster.local)
 [[ $code == 401 ]] && pass "ingress without token: 401" || fail "ingress without token: $code"
 token=$(kind_kubectl -n default create token default --audience contrib-eventing)

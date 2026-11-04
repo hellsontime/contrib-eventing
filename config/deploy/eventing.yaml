@@ -233,3 +233,38 @@ spec:
             matchLabels: {kubernetes.io/metadata.name: contrib-eventing}
           podSelector:
             matchLabels: {app: ingress}
+---
+# The broker's channel accepts events, too, and hands them to every Trigger.
+# Only Knative's broker ingress may reach it, so nothing gets past our ingress
+# that way.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: contrib-eventing-channel
+  namespace: knative-eventing
+spec:
+  podSelector:
+    matchLabels:
+      messaging.knative.dev/role: dispatcher
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {eventing.knative.dev/brokerRole: ingress}
+---
+# The broker filter delivers what it gets to a Trigger's sink. Only the
+# channel's dispatcher may reach it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: contrib-eventing-broker-filter
+  namespace: knative-eventing
+spec:
+  podSelector:
+    matchLabels:
+      eventing.knative.dev/brokerRole: filter
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {messaging.knative.dev/role: dispatcher}
