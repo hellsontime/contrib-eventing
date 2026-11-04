@@ -65,7 +65,8 @@ failed attempt; `backoffPolicy` (`linear` or `exponential`, default
 `exponential`) and `backoffDelay` (ISO 8601, default `PT0.2S`) shape the wait in
 between. `timeout` limits a single request. An event that still failed after the
 last retry goes to `deadLetterSink`, with Knative's `knativeerrordest`,
-`knativeerrorcode` and `knativeerrordata` attributes added. Without a dead
+`knativeerrorcode` and `knativeerrordata` attributes added; when the last try
+timed out there was no answer, and these attributes are missing. Without a dead
 letter sink it is dropped.
 
 Only answers 5xx, 408 and 429, a sink that cannot be reached and a request

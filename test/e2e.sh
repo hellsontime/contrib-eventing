@@ -280,6 +280,137 @@ wait_for "SinkNotAllowed" 60 is_reason SinkNotAllowed && pass "dead letter sink 
 [[ $(triggers) == 0 ]] && pass "Trigger removed" || fail "Trigger still there"
 admin delete subscription e2e-not-allowed --timeout=60s >/dev/null
 
+log "The broker's channel retries, times out and redelivers as documented"
+# probe answers by path: /status/<code>, /delay/<seconds>, anything else 200.
+# It logs "got <path> <event id> <knativeerrordest or ->" for every request.
+probe=http://probe.eventing-demo-sink.svc.cluster.local
+kind_kubectl apply -f - >/dev/null <<'YAML'
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: probe, namespace: eventing-demo-sink}
+data:
+  probe.py: |
+    import sys, threading, time
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    lock = threading.Lock()
+    class H(BaseHTTPRequestHandler):
+        def log_message(self, *a): pass
+        def do_POST(self):
+            self.rfile.read(int(self.headers.get("content-length", 0)))
+            with lock:
+                sys.stdout.write(f"got {self.path} {self.headers.get('ce-id')} {self.headers.get('ce-knativeerrordest', '-')}\n")
+                sys.stdout.flush()
+            kind, _, arg = self.path.strip("/").partition("/")
+            if kind == "delay":
+                time.sleep(float(arg))
+            try:
+                self.send_response(int(arg) if kind == "status" else 200)
+                self.send_header("content-length", "0")
+                self.end_headers()
+            except OSError:
+                pass
+    ThreadingHTTPServer(("", 8080), H).serve_forever()
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: probe, namespace: eventing-demo-sink, labels: {app: probe}}
+spec:
+  containers:
+    - name: probe
+      image: python:3.12-alpine
+      command: [python, -u, /probe/probe.py]
+      volumeMounts: [{name: probe, mountPath: /probe}]
+  volumes: [{name: probe, configMap: {name: probe}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: probe, namespace: eventing-demo-sink}
+spec:
+  selector: {app: probe}
+  ports: [{port: 80, targetPort: 8080}]
+YAML
+kind_kubectl -n eventing-demo-sink wait --for=condition=Ready pod/probe --timeout=180s >/dev/null
+probe_logs() { kind_kubectl -n eventing-demo-sink logs probe; }
+# tries <path> <event id>: how often the probe got the event on that path.
+tries() { probe_logs | grep -c "^got $1 $2 " || true; }
+# dest <path> <event id>: knativeerrordest of the event the probe got there.
+dest() { probe_logs | grep "^got $1 $2 " | tail -1 | cut -d' ' -f4; }
+# within <seconds> <command...>: like wait_for, but reports instead of exiting.
+within() {
+  local timeout=$1 start=$SECONDS
+  shift
+  until "$@" >/dev/null 2>&1; do
+    ((SECONDS - start < timeout)) || return 1
+    sleep 1
+  done
+}
+at_least() { (($("${@:2}") >= $1)); }
+probe_sub() { # probe_sub <name> <type> <path> <delivery as JSON>
+  admin apply -f - >/dev/null <<YAML
+apiVersion: eventing.platform-mesh.io/v1alpha1
+kind: Subscription
+metadata: {name: $1}
+spec:
+  filter: {types: [io.platform-mesh.iam.membership.$2.v1alpha1]}
+  sink: {uri: $probe$3}
+  delivery: $4
+YAML
+}
+probe_ready() { [[ $(admin get subscription "$1" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}') == True ]]; }
+dls() { echo "\"deadLetterSink\": {\"uri\": \"$probe/dls/$1\"}"; }
+probe_sub e2e-404 granted /status/404 "{\"retry\": 2, \"backoffDelay\": \"PT0.2S\", $(dls 404)}"
+probe_sub e2e-500 granted /status/500 "{\"retry\": 2, \"backoffDelay\": \"PT0.2S\", $(dls 500)}"
+probe_sub e2e-slow granted /delay/10 "{\"retry\": 1, \"backoffDelay\": \"PT0.2S\", \"timeout\": \"PT2S\", $(dls slow)}"
+probe_sub e2e-ok granted /ok '{"retry": 2}'
+for s in e2e-404 e2e-500 e2e-slow e2e-ok; do wait_for "Subscription $s ready" 60 probe_ready $s; done
+sleep 5
+add_member "$DEMO_USER" member
+got_ok() { probe_logs | grep -q "^got /ok "; }
+wait_for "the event at the probe" 30 got_ok
+id=$(probe_logs | grep "^got /ok " | tail -1 | cut -d' ' -f3)
+start=$SECONDS
+within 30 at_least 1 tries /dls/500 "$id" && [[ $(tries /status/500 "$id") == 3 && $(dest /dls/500 "$id") == "$probe/status/500" ]] &&
+  pass "500: first try and 2 retries, then the dead letter sink" ||
+  fail "500: $(tries /status/500 "$id") tries, $(tries /dls/500 "$id") dead letters from $(dest /dls/500 "$id")"
+within 30 at_least 1 tries /dls/slow "$id" || true
+slow=$((SECONDS - start))
+# A timed-out request has no answer, so its dead letter has no knativeerror* attributes.
+[[ $(tries /delay/10 "$id") == 2 && $(tries /dls/slow "$id") == 1 ]] && ((slow < 9)) &&
+  pass "timeout: 2 tries cut off after 2s, dead letter after ${slow}s" ||
+  fail "timeout: $(tries /delay/10 "$id") tries, $(tries /dls/slow "$id") dead letters after ${slow}s"
+[[ $(tries /status/404 "$id") == 1 && $(tries /dls/404 "$id") == 0 ]] &&
+  pass "404: one try, no dead letter" ||
+  fail "404: $(tries /status/404 "$id") tries, $(tries /dls/404 "$id") dead letters"
+
+# Knative recreates the channel subscription when the delivery changes. The new
+# one must start at new events, not hand the probe the stream again.
+channel_subs() { kind_kubectl -n "$NS" get subscriptions.messaging.knative.dev -o jsonpath='{.items[*].metadata.uid}' | tr ' ' '\n' | sort; }
+before=$(channel_subs)
+admin patch subscription e2e-ok --type merge -p '{"spec": {"delivery": {"retry": 3}}}' >/dev/null
+recreated() { [[ $(channel_subs) != "$before" ]]; }
+wait_for "the channel subscription to be recreated" 60 recreated
+wait_for "Subscription e2e-ok ready" 60 probe_ready e2e-ok
+sleep 15
+[[ $(probe_logs | grep "^got /ok " | sort | uniq -d | wc -l) == 0 ]] &&
+  pass "changed delivery: no event delivered again" ||
+  fail "changed delivery replayed: $(probe_logs | grep "^got /ok " | sort | uniq -d | head -3)"
+for s in e2e-404 e2e-500 e2e-slow e2e-ok; do admin delete subscription $s --timeout=60s >/dev/null; done
+
+# The dispatcher dies while it delivers. JetStream hands the event out again.
+probe_sub e2e-redeliver revoked /delay/8 '{"retry": 2, "timeout": "PT20S"}'
+wait_for "Subscription e2e-redeliver ready" 60 probe_ready e2e-redeliver
+sleep 5
+add_member --remove "$DEMO_USER" member
+got_slow() { probe_logs | grep -q "^got /delay/8 "; }
+wait_for "the event at the probe" 30 got_slow
+id=$(probe_logs | grep "^got /delay/8 " | tail -1 | cut -d' ' -f3)
+kind_kubectl -n knative-eventing delete pod -l messaging.knative.dev/role=dispatcher --grace-period=0 --force >/dev/null 2>&1
+within 120 at_least 2 tries /delay/8 "$id" && pass "redelivered after the dispatcher died" ||
+  fail "not redelivered after the dispatcher died"
+kind_kubectl -n knative-eventing rollout status deploy/jetstream-ch-dispatcher --timeout=120s >/dev/null
+admin delete subscription e2e-redeliver --timeout=60s >/dev/null
+kind_kubectl -n eventing-demo-sink delete pod/probe svc/probe cm/probe --wait=false >/dev/null
+
 log "No events after the Subscription is deleted"
 admin delete subscription $sub --timeout=60s >/dev/null
 before=$(count granted)
