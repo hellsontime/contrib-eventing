@@ -27,13 +27,6 @@ const (
 	// BrokerName is the name of the one Broker.
 	BrokerName = "default"
 
-	// asyncHandlerAnnotation makes the Broker's channel accept an event before
-	// it is delivered. Without it the channel waits for every Trigger, retries
-	// included, so one failing sink holds up the ingress and the adapter
-	// publishes the event again to everyone. Knative copies the annotation from
-	// the Broker to the channel when it creates the channel.
-	asyncHandlerAnnotation = "messaging.knative.dev/async-handler"
-
 	// The backoff of Knative's default Broker config. A Trigger with its own
 	// delivery replaces the Broker's delivery as a whole, and the JetStream
 	// dispatcher crashes on a retry without backoff, so we always set both.
@@ -88,7 +81,6 @@ func (b *Backend) ensureBroker(ctx context.Context) error {
 	br.SetGroupVersionKind(brokerGVK)
 	br.SetNamespace(b.Namespace)
 	br.SetName(BrokerName)
-	br.SetAnnotations(map[string]string{asyncHandlerAnnotation: "true"})
 	if err := b.Client.Create(ctx, br); err != nil && !apierrors.IsAlreadyExists(err) {
 		return fmt.Errorf("broker %s/%s: %w", b.Namespace, BrokerName, err)
 	}

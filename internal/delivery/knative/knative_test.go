@@ -75,7 +75,7 @@ func TestTriggerSpecDeadLetters(t *testing.T) {
 	}, triggerSpec(sub)["delivery"])
 }
 
-func TestEnsureBrokerIsAsync(t *testing.T) {
+func TestEnsureBroker(t *testing.T) {
 	ctx := context.Background()
 	b := &Backend{Client: fake.NewClientBuilder().Build(), Namespace: "contrib-eventing"}
 
@@ -85,7 +85,6 @@ func TestEnsureBrokerIsAsync(t *testing.T) {
 	br := &unstructured.Unstructured{}
 	br.SetGroupVersionKind(brokerGVK)
 	require.NoError(t, b.Client.Get(ctx, ctrlruntimeclient.ObjectKey{Namespace: "contrib-eventing", Name: BrokerName}, br))
-	assert.Equal(t, map[string]string{asyncHandlerAnnotation: "true"}, br.GetAnnotations())
 }
 
 func TestTriggerSpecWithOrgs(t *testing.T) {
