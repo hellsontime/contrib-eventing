@@ -54,7 +54,7 @@ Sent when a user gets or loses a role on an account.
 | `org` | yes | org name |
 | `account` | yes | account name. Nested accounts can share a name, so don't use it as a key. |
 | `accountId` | yes | the account, unique in the platform: the logical cluster of the workspace that holds the Account object, and the account name. It is the same pair the account's `AccountInfo` shows as `originClusterId` and `name`. |
-| `accountPath` | no | the account's kcp workspace path, for example `root:orgs:acme:team-a`. The iam-service API addresses accounts by it. Missing if the workspace that holds the Account was already gone when the event was built. |
+| `accountPath` | no | the account's kcp workspace path, for example `root:orgs:acme:team-a`. The iam-service API addresses accounts by it. Missing if the account was deleted before eventing saw it, for example while the adapter was restarting. |
 | `role` | yes | Platform Mesh role, for example `owner` or `member` |
 | `user.id` | yes | the user as Platform Mesh identifies them, see below |
 
@@ -107,6 +107,9 @@ to a single snapshot.
 - **An empty list** means the account has no members, for example after it was
   deleted.
 - **No names.** The list has user ids only.
+- **Only on change.** A snapshot is sent when the account's members change. A
+  new Subscription, or one that missed a snapshot, gets an account's list with
+  that account's next change.
 
 ## What subscribers should expect
 
