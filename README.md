@@ -46,8 +46,10 @@ kubectl -n eventing-demo-sink logs deploy/event-display
 ```
 
 The sink shows a `membership.granted` event. `./hack/add-member.sh --remove`
-takes the role away again, `./test/e2e.sh` checks the whole path and
-`./hack/uninstall.sh` removes everything.
+takes the role away again, `./test/e2e.sh` checks the whole path,
+`./test/install-check.sh --uninstall` checks that installing again changes
+nothing and uninstalling leaves nothing, and `./hack/uninstall.sh` removes
+everything.
 
 ## Background
 
