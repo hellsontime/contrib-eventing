@@ -73,6 +73,7 @@ If eventing is not installed, Platform Mesh works exactly as before.
 These came out of the [spike](https://github.com/platform-mesh/backlog/issues/421) and are open work:
 
 - The Knative broker ingress, the channel and the broker filter accept any event from inside the cluster, which is why our own ingress sits in front of them. NetworkPolicies let only our ingress reach the broker ingress, only the broker ingress reach the channel, and only the channel reach the filter.
+- A Subscription deleted while the JetStream channel's controller or dispatcher is down leaves its consumer behind in NATS. It holds no events, since the stream drops old events by age and size anyway; `nats consumer rm` removes it.
 - The allowlist checks the sink's URL. Knative follows redirects, and a 307 or 308 sends the event on to another host. That is no different from a sink that forwards events itself: the allowlist decides who gets events first-hand.
 - The ingress accepts only the platform's own adapters so far. Providers publishing events for their orgs is not built yet.
 - Replies are blocked by the same NetworkPolicy. If a subscriber answers with a CloudEvent, Knative's broker filter tries to send it to the broker ingress, which doesn't let it in; the filter retries for a while and drops it. Knative OIDC with an EventPolicy per broker would reject replies properly, but it is alpha and switched on for the whole cluster.
