@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Removes what install.sh added. Platform Mesh itself is left alone.
 #   --keep-org      keep the demo organization
-#   --keep-knative  keep Knative Eventing installed
+#   --keep-knative  keep Knative Eventing and NATS installed
 source "$(dirname "$0")/lib.sh"
 
 keep_org=false keep_knative=false
@@ -43,16 +43,22 @@ if ! $keep_org; then
 fi
 
 if ! $keep_knative; then
+  # The broker's channel has a finalizer that the JetStream controller removes,
+  # so the namespace has to be gone before Knative goes.
+  kind_kubectl wait --for=delete ns/"$NS" --timeout=300s >/dev/null 2>&1 || true
   log "Removing Knative Eventing"
   dir=$SECRET_DIR/knative-$KNATIVE_VERSION
-  for f in mt-channel-broker.yaml in-memory-channel.yaml eventing-core.yaml eventing-crds.yaml; do
+  # in-memory-channel.yaml is from older installs.
+  for f in mt-channel-broker.yaml eventing-jsm.yaml in-memory-channel.yaml eventing-core.yaml eventing-crds.yaml; do
     [[ -f $dir/$f ]] && kind_kubectl delete -f "$dir/$f" --ignore-not-found --wait=false >/dev/null 2>&1 || true
   done
+  log "Removing NATS"
+  kind_kubectl delete -f "$ROOT/config/nats/nats.yaml" --ignore-not-found --wait=false >/dev/null
 fi
 
 # Wait until everything is really gone, so install.sh can run right after.
 log "Waiting for the deletions to finish"
-kind_kubectl wait --for=delete ns/"$NS" ns/eventing-demo-sink ns/knative-eventing --timeout=300s >/dev/null 2>&1 || true
+kind_kubectl wait --for=delete ns/"$NS" ns/eventing-demo-sink ns/knative-eventing ns/nats-io --timeout=300s >/dev/null 2>&1 || true
 if ! $keep_org; then
   org_gone() { ! kcp root:orgs get workspace "$ORG" >/dev/null 2>&1; }
   wait_for "workspace root:orgs:$ORG to be deleted" 300 org_gone
