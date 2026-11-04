@@ -17,7 +17,8 @@ The rules that matter:
 - Answer with a 2xx and an **empty body**, quickly. A body that is not a
   CloudEvent counts as a failed delivery. A body that is a CloudEvent is taken
   as a reply; replies are blocked and dropped, they never reach anyone.
-- 404, 408, 409, 429 and 5xx are retried with backoff; any other status is not.
+- 5xx, 408 and 429 are retried with backoff; any other status is not (see
+  below).
 - The same event can arrive more than once. Drop events whose `ce-id` you have
   already seen. There is no order between events.
 - The endpoint must be reachable from inside the cluster, for example as a
@@ -74,6 +75,19 @@ letter sink it is dropped.
 Only answers 5xx, 408 and 429, a sink that cannot be reached and a request
 that times out are retried. Without `timeout` a request may take about 30
 seconds. Any other 4xx drops the event at once, without the dead letter sink.
+
+```mermaid
+flowchart TD
+  send[Event sent to your endpoint] --> answer{Your answer}
+  answer -- "2xx, empty body" --> done[Delivered]
+  answer -- "2xx with a CloudEvent" --> reply["Delivered, the reply is dropped"]
+  answer -- "5xx, 408, 429, timeout,<br/>unreachable, other 2xx body" --> left{Retries left?}
+  answer -- other 4xx --> dropped[Dropped]
+  left -- yes --> wait[Wait, backoff grows] --> send
+  left -- no --> dlsset{Dead letter sink?}
+  dlsset -- yes --> dl[Sent to the dead letter sink]
+  dlsset -- no --> dropped
+```
 
 The Subscription is ready when `READY` is `True`; otherwise `REASON` says what
 is missing. Events start arriving with the next membership change. Deleting the

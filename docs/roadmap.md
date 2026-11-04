@@ -9,10 +9,10 @@ Each milestone ends with something that runs on a local kind setup.
    sender before an event reaches the broker.
    Providers get a way to publish their own events through that ingress. One
    script adds all of this to a local Platform Mesh.
-2. **Ready for a first consumer.** Subscription targets limited by an
-   allowlist the platform operator controls, replies from subscribers blocked,
-   a durable channel (NATS JetStream) instead of the in-memory one, dead letter sinks, and the contract checked with the
-   first consumer (snapshots).
+2. **Ready for a first consumer.** Members snapshots and account paths in the
+   events, subscription targets limited by an allowlist the platform operator
+   controls, replies from subscribers blocked, a durable channel (NATS
+   JetStream) instead of the in-memory one, timeouts and dead letter sinks.
 3. **Keycloak events.** Login, user created and user deleted, from a Keycloak
    adapter. A prototype for login exists.
 4. **Installable module.** Published images and chart, install through

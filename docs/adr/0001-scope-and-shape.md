@@ -63,8 +63,10 @@ Because Knative stays behind our API, moving to B or C later changes nothing for
 
 ## Open Questions
 
-- Do consumers need snapshots in addition to changes?
-- Which durable broker class is the default for production?
+- ~~Do consumers need snapshots in addition to changes?~~
+  Yes. The adapter sends a members snapshot after each change of an account.
+- ~~Which durable broker class is the default for production?~~
+  The channel based broker on a NATS JetStream channel.
 - ~~How does the module map a kcp workspace to its org name without admin access?~~
   A permission claim on `logicalclusters` gives the controller the workspace path.
 

@@ -6,21 +6,38 @@ This page explains the parts of the eventing module and how an event travels thr
 
 ```mermaid
 flowchart LR
-  fga[OpenFGA adapter]
-  subgraph Module[Eventing module]
-    ing[Ingress]
-    subs[Subscription controller]
-    kn[Knative Broker and Triggers]
+  subgraph PM[Platform Mesh]
+    fga[(OpenFGA)]
+    info["AccountInfo<br/>in every account workspace"]
   end
-  subgraph Admin[Eventing workspace in kcp]
+  subgraph Admin["root:providers:eventing"]
     sub[Subscription]
   end
-  fga --> ing
-  ing --> kn
-  sub -. watched by .-> subs
-  subs -. creates Trigger .-> kn
-  kn --> sink[Subscriber endpoint]
+  subgraph Module[Eventing module]
+    adapter[OpenFGA adapter]
+    ing[Ingress]
+    ctrl[Subscription controller]
+  end
+  subgraph Knative[Knative Eventing]
+    bi[Broker ingress]
+    ch[("Channel<br/>NATS JetStream")]
+    filter["Broker filter<br/>one Trigger per Subscription"]
+  end
+  fga -- changelog and members --> adapter
+  info -. "watched through core.platform-mesh.io" .-> adapter
+  adapter -- events --> ing
+  ing -- checked sender --> bi
+  bi -- stored --> ch
+  ch -- per Trigger, with retries --> filter
+  filter --> sink[Subscriber endpoint]
+  ch -. after the last retry .-> dls[Dead letter sink]
+  sub -. watched by .-> ctrl
+  ctrl -. Trigger .-> filter
 ```
+
+Only the solid arrows carry events, and NetworkPolicies let each part of
+Knative be reached only from the part before it (see
+[how it plugs in](#how-it-plugs-in)).
 
 | Part | What it does | Who builds it |
 | --- | --- | --- |
@@ -34,9 +51,39 @@ flowchart LR
 
 Example: Alice is made a member of account `team-a` in org `acme`.
 
+```mermaid
+sequenceDiagram
+  autonumber
+  participant P as Portal / iam-service
+  participant F as OpenFGA
+  participant A as OpenFGA adapter
+  participant I as Ingress
+  participant K as Knative and JetStream
+  participant S as Subscriber
+  P->>F: write role tuple
+  loop every few seconds
+    A->>F: read the changelog of acme
+  end
+  A->>I: membership.granted
+  I->>I: check the sender
+  I->>K: forward
+  K-->>I: accepted once stored
+  I-->>A: accepted
+  A->>F: read the members of team-a
+  A->>I: account.members snapshot
+  I->>K: forward
+  K->>S: POST, once per matching Subscription
+  alt 2xx
+    S-->>K: done
+  else 5xx, 408, 429 or timeout
+    K->>S: retry with backoff
+    K->>K: after the last retry, to the dead letter sink
+  end
+```
+
 1. Someone adds Alice in the portal, and iam-service writes a role tuple to OpenFGA. Nothing in that path knows about eventing.
-2. The OpenFGA adapter polls the changelog of the `acme` store, sees the new tuple, and builds a `membership.granted` event ([contract](contract.md)).
-3. The adapter posts the event to the ingress. The ingress checks the adapter's identity and forwards the event to the broker.
+2. The OpenFGA adapter polls the changelog of the `acme` store, sees the new tuple, and builds a `membership.granted` event ([contract](contract.md)). The path `root:orgs:acme:team-a` comes from the AccountInfo it watches.
+3. The adapter posts the event to the ingress. The ingress checks the adapter's identity and forwards the event to the broker, which accepts it once the channel has stored it in NATS JetStream. Then the adapter reads the members of `team-a` and sends a snapshot the same way. Only after every event of a changelog page was accepted does the adapter move on, so nothing is skipped.
 4. A Subscription asked for membership events (of all orgs, or of `acme`). Its Trigger matches, and Knative sends the event to the subscriber's URL.
 5. If the subscriber does not answer with success, Knative retries with backoff. After the last attempt the event goes to a dead letter sink, if one is set.
 
@@ -46,7 +93,7 @@ Subscriptions are for platform admins. They live in the provider workspace `root
 
 One broker carries the events of all orgs. Every event names its org in `pmorg`, and a Subscription can be limited to some orgs.
 
-Org-level and account-level subscriptions are not in the first milestone.
+Org-level and account-level subscriptions are on the [roadmap](roadmap.md).
 
 ## How it plugs in
 
@@ -55,7 +102,7 @@ The module does not change Platform Mesh components. It needs:
 - an APIExport for the Subscription API, bound in its own workspace;
 - read access to the OpenFGA changelog and tuples;
 - a watch on `AccountInfo` in all workspaces through the `core.platform-mesh.io` export, for account paths: a provider connection like the one iam-service gets. Paths of deleted accounts stay in memory, so the last events about them still carry the path;
-- Knative Eventing and its NATS JetStream channel in the cluster, used by eventing only. NetworkPolicies let only our ingress reach Knative's broker ingress, only the broker ingress reach the channel, and only the channel reach the broker filter. These parts are shared by every broker in the cluster;
+- Knative Eventing and its NATS JetStream channel in the cluster, used by eventing only. Knative's broker ingress, the channel and the broker filter accept any event from inside the cluster, which is why our own ingress sits in front of them: NetworkPolicies let only our ingress reach the broker ingress, only the broker ingress reach the channel, and only the channel reach the broker filter. These parts are shared by every broker in the cluster;
 - an HTTPRoute on the platform's Gateway, so publishers outside the cluster can reach the ingress.
 
 If eventing is not installed, Platform Mesh works exactly as before.
@@ -70,11 +117,10 @@ If eventing is not installed, Platform Mesh works exactly as before.
 
 ## Known gaps
 
-These came out of the [spike](https://github.com/platform-mesh/backlog/issues/421) and are open work:
+These are open work:
 
-- The Knative broker ingress, the channel and the broker filter accept any event from inside the cluster, which is why our own ingress sits in front of them. NetworkPolicies let only our ingress reach the broker ingress, only the broker ingress reach the channel, and only the channel reach the filter.
 - A Subscription deleted while the JetStream channel's controller or dispatcher is down leaves its consumer behind in NATS. It holds no events, since the stream drops old events by age and size anyway; `nats consumer rm` removes it.
 - The allowlist checks the sink's URL. Knative follows redirects, and a 307 or 308 sends the event on to another host. That is no different from a sink that forwards events itself: the allowlist decides who gets events first-hand.
 - The ingress accepts only the platform's own adapters so far. Providers publishing events for their orgs is not built yet.
-- Replies are blocked by the same NetworkPolicy. If a subscriber answers with a CloudEvent, Knative's broker filter tries to send it to the broker ingress, which doesn't let it in; the filter retries for a while and drops it. Knative OIDC with an EventPolicy per broker would reject replies properly, but it is alpha and switched on for the whole cluster.
+- Replies are blocked by the NetworkPolicy in front of the broker ingress. If a subscriber answers with a CloudEvent, Knative's broker filter tries to send it to the broker ingress, which doesn't let it in; the filter retries for a while and drops it. Knative OIDC with an EventPolicy per broker would reject replies properly, but it is alpha and switched on for the whole cluster.
 - The ingress is reachable at `eventing.services.<domain>` through the `terminate-services` listener of the platform Gateway. In the kind setup the platform certificate covers `*.<domain>` but not `*.services.<domain>`, so that host gets Traefik's default certificate.
