@@ -61,6 +61,11 @@ func (b *Backend) Ensure(ctx context.Context, trigger string, sub *v1alpha1.Subs
 		t.SetAnnotations(map[string]string{"eventing.platform-mesh.io/subscription": sub.Name})
 		return unstructured.SetNestedMap(t.Object, triggerSpec(sub), "spec")
 	})
+	if apierrors.IsBadRequest(err) || apierrors.IsInvalid(err) {
+		// Knative's webhook rejected the Trigger, for example a timeout that
+		// isn't a duration.
+		return delivery.Status{}, fmt.Errorf("%w: %w", delivery.ErrInvalid, err)
+	}
 	if err != nil {
 		return delivery.Status{}, fmt.Errorf("trigger %s/%s: %w", b.Namespace, trigger, err)
 	}

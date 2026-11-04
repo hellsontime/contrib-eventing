@@ -7,6 +7,7 @@ package subscription
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -25,10 +26,14 @@ import (
 
 type fakeBackend struct {
 	ensured, deleted []string
+	err              error
 }
 
 func (f *fakeBackend) Ensure(_ context.Context, name string, _ *v1alpha1.Subscription) (delivery.Status, error) {
 	f.ensured = append(f.ensured, name)
+	if f.err != nil {
+		return delivery.Status{}, f.err
+	}
 	return delivery.Status{Ready: true, Reason: "Ready"}, nil
 }
 
@@ -102,6 +107,23 @@ func TestSinkNotAllowed(t *testing.T) {
 			assert.Equal(t, []string{deliveryName("c1", "s")}, backend.deleted, "an existing Trigger must go")
 		})
 	}
+}
+
+func TestInvalidDelivery(t *testing.T) {
+	backend := &fakeBackend{err: fmt.Errorf("%w: timeout abc", delivery.ErrInvalid)}
+	c := workspace(t, subscription())
+	r := &Reconciler{Delivery: backend, AllowedSinkHosts: []string{"*.svc.cluster.local"}}
+
+	res, err := r.reconcile(context.Background(), c, "c1", types.NamespacedName{Name: "s"})
+	require.NoError(t, err, "trying again doesn't help")
+	assert.Zero(t, res.RequeueAfter)
+
+	got := &v1alpha1.Subscription{}
+	require.NoError(t, c.Get(context.Background(), types.NamespacedName{Name: "s"}, got))
+	assert.Equal(t, metav1.ConditionFalse, got.Status.Conditions[0].Status)
+	assert.Equal(t, "InvalidDelivery", got.Status.Conditions[0].Reason)
+	assert.Contains(t, got.Status.Conditions[0].Message, "timeout abc")
+	assert.Equal(t, []string{deliveryName("c1", "s")}, backend.deleted, "the Trigger from before must go")
 }
 
 func TestCheckSinks(t *testing.T) {

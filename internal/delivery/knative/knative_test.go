@@ -13,10 +13,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/platform-mesh/contrib-eventing/api/v1alpha1"
+	"github.com/platform-mesh/contrib-eventing/internal/delivery"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	ctrlruntimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 )
 
 func TestTriggerSpec(t *testing.T) {
@@ -85,6 +88,29 @@ func TestEnsureBroker(t *testing.T) {
 	br := &unstructured.Unstructured{}
 	br.SetGroupVersionKind(brokerGVK)
 	require.NoError(t, b.Client.Get(ctx, ctrlruntimeclient.ObjectKey{Namespace: "contrib-eventing", Name: BrokerName}, br))
+}
+
+func TestEnsureRejected(t *testing.T) {
+	rejected := apierrors.NewBadRequest(`admission webhook "validation.webhook.eventing.knative.dev" denied the request: validation failed: invalid value: abc: spec.delivery.timeout`)
+	c := fake.NewClientBuilder().WithInterceptorFuncs(interceptor.Funcs{
+		Create: func(ctx context.Context, c ctrlruntimeclient.WithWatch, obj ctrlruntimeclient.Object, opts ...ctrlruntimeclient.CreateOption) error {
+			if obj.GetObjectKind().GroupVersionKind() == triggerGVK {
+				return rejected
+			}
+			return c.Create(ctx, obj, opts...)
+		},
+	}).Build()
+	b := &Backend{Client: c, Namespace: "contrib-eventing"}
+	timeout := "abc"
+	sub := &v1alpha1.Subscription{Spec: v1alpha1.SubscriptionSpec{
+		Filter:   v1alpha1.Filter{Types: []string{"a"}},
+		Sink:     v1alpha1.Sink{URI: "http://sink"},
+		Delivery: &v1alpha1.Delivery{Timeout: &timeout},
+	}}
+
+	_, err := b.Ensure(context.Background(), "t", sub)
+	require.ErrorIs(t, err, delivery.ErrInvalid)
+	assert.Contains(t, err.Error(), "spec.delivery.timeout")
 }
 
 func TestTriggerSpecWithOrgs(t *testing.T) {

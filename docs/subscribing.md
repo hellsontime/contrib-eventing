@@ -63,7 +63,8 @@ kcp root:providers:eventing get subscriptions
 backoff from 0.2 seconds. `retry` is the number of retries after the first
 failed attempt; `backoffPolicy` (`linear` or `exponential`, default
 `exponential`) and `backoffDelay` (ISO 8601, default `PT0.2S`) shape the wait in
-between. `timeout` limits a single request. An event that still failed after the
+between. `timeout` limits a single request and must be more than zero; if Knative rejects
+the settings, the Subscription stays `Ready=False` with reason `InvalidDelivery`. An event that still failed after the
 last retry goes to `deadLetterSink`, with Knative's `knativeerrordest`,
 `knativeerrorcode` and `knativeerrordata` attributes added; when the last try
 timed out there was no answer, and these attributes are missing. Without a dead

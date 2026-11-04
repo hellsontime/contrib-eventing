@@ -11,6 +11,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"time"
 
 	"github.com/platform-mesh/contrib-eventing/api/v1alpha1"
@@ -83,6 +84,13 @@ func (r *Reconciler) reconcile(ctx context.Context, c ctrlruntimeclient.Client, 
 	}
 
 	status, err := r.Delivery.Ensure(ctx, name, sub)
+	if errors.Is(err, delivery.ErrInvalid) {
+		// Don't keep delivering with the settings from before.
+		if err := r.Delivery.Delete(ctx, name); err != nil {
+			return ctrl.Result{}, err
+		}
+		return setStatus(ctx, c, sub, delivery.Status{Reason: "InvalidDelivery", Message: err.Error()}, 0)
+	}
 	if err != nil {
 		return ctrl.Result{}, err
 	}
