@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v261103-954cd8d.subscriptions.eventing.platform-mesh.io
+  name: v261104-fed92be.subscriptions.eventing.platform-mesh.io
 spec:
   group: eventing.platform-mesh.io
   names:
@@ -52,6 +52,7 @@ spec:
                 backoffDelay:
                   description: BackoffDelay is the base delay between retries as an
                     ISO 8601 duration, e.g. PT0.5S.
+                  pattern: ^P(\d+Y)?(\d+M)?(\d+W)?(\d+D)?(T(\d+H)?(\d+M)?(\d+(\.\d+)?S)?)?$
                   type: string
                 backoffPolicy:
                   enum:
@@ -78,6 +79,7 @@ spec:
                   description: |-
                     Timeout is how long a single request to the sink may take, as an ISO 8601
                     duration, e.g. PT10S.
+                  pattern: ^P(\d+Y)?(\d+M)?(\d+W)?(\d+D)?(T(\d+H)?(\d+M)?(\d+(\.\d+)?S)?)?$
                   type: string
               type: object
             filter:

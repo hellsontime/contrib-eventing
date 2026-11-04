@@ -56,6 +56,7 @@ spec:
                   backoffDelay:
                     description: BackoffDelay is the base delay between retries as
                       an ISO 8601 duration, e.g. PT0.5S.
+                    pattern: ^P(\d+Y)?(\d+M)?(\d+W)?(\d+D)?(T(\d+H)?(\d+M)?(\d+(\.\d+)?S)?)?$
                     type: string
                   backoffPolicy:
                     enum:
@@ -82,6 +83,7 @@ spec:
                     description: |-
                       Timeout is how long a single request to the sink may take, as an ISO 8601
                       duration, e.g. PT10S.
+                    pattern: ^P(\d+Y)?(\d+M)?(\d+W)?(\d+D)?(T(\d+H)?(\d+M)?(\d+(\.\d+)?S)?)?$
                     type: string
                 type: object
               filter:

@@ -42,10 +42,12 @@ type Delivery struct {
 	// +optional
 	BackoffPolicy *string `json:"backoffPolicy,omitempty"`
 	// BackoffDelay is the base delay between retries as an ISO 8601 duration, e.g. PT0.5S.
+	// +kubebuilder:validation:Pattern=`^P(\d+Y)?(\d+M)?(\d+W)?(\d+D)?(T(\d+H)?(\d+M)?(\d+(\.\d+)?S)?)?$`
 	// +optional
 	BackoffDelay *string `json:"backoffDelay,omitempty"`
 	// Timeout is how long a single request to the sink may take, as an ISO 8601
 	// duration, e.g. PT10S.
+	// +kubebuilder:validation:Pattern=`^P(\d+Y)?(\d+M)?(\d+W)?(\d+D)?(T(\d+H)?(\d+M)?(\d+(\.\d+)?S)?)?$`
 	// +optional
 	Timeout *string `json:"timeout,omitempty"`
 	// DeadLetterSink gets the events the sink did not accept after all retries.
