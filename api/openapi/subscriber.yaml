@@ -49,11 +49,7 @@ webhooks:
       responses:
         '2XX':
           $ref: '#/components/responses/Delivered'
-        '404':
-          $ref: '#/components/responses/Retried'
         '408':
-          $ref: '#/components/responses/Retried'
-        '409':
           $ref: '#/components/responses/Retried'
         '429':
           $ref: '#/components/responses/Retried'
@@ -82,11 +78,7 @@ webhooks:
       responses:
         '2XX':
           $ref: '#/components/responses/Delivered'
-        '404':
-          $ref: '#/components/responses/Retried'
         '408':
-          $ref: '#/components/responses/Retried'
-        '409':
           $ref: '#/components/responses/Retried'
         '429':
           $ref: '#/components/responses/Retried'
@@ -121,11 +113,7 @@ webhooks:
       responses:
         '2XX':
           $ref: '#/components/responses/Delivered'
-        '404':
-          $ref: '#/components/responses/Retried'
         '408':
-          $ref: '#/components/responses/Retried'
-        '409':
           $ref: '#/components/responses/Retried'
         '429':
           $ref: '#/components/responses/Retried'
@@ -220,7 +208,7 @@ components:
     Retried:
       description: Failed for now; delivered again with backoff, up to the Subscription's retry count.
     Failed:
-      description: Any other status is a failed delivery and is not retried.
+      description: Any other status is a failed delivery. It is not retried and does not go to the dead letter sink.
   schemas:
     Membership:
       type: object

@@ -36,7 +36,8 @@ What comes after is in the [roadmap](docs/roadmap.md).
 
 You need a local Platform Mesh on kind, installed as described in
 [helm-charts/installation](https://github.com/platform-mesh/helm-charts/tree/main/installation),
-and `kubectl`, `docker`, `curl` and `jq`. Knative in that cluster must be used by eventing only (see [architecture](docs/architecture.md#how-it-plugs-in)).
+and `kubectl`, `docker`, `curl` and `jq`. The install adds Knative Eventing and a
+single NATS JetStream server; Knative in that cluster must be used by eventing only (see [architecture](docs/architecture.md#how-it-plugs-in)).
 
 ```sh
 ./hack/install.sh     # adds eventing, a subscribed sink and a demo org eventing-demo

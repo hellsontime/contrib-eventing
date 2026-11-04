@@ -59,17 +59,23 @@ EOF
 kcp root:providers:eventing get subscriptions
 ```
 
-`delivery` is optional. `retry` is the number of retries after the first
-failed attempt; `backoffPolicy` (`linear` or `exponential`) and `backoffDelay`
-(ISO 8601, e.g. `PT0.5S`) shape the wait in between. `timeout` limits a single
-request. An event that still failed after the last retry goes to
-`deadLetterSink`, with Knative's `knativeerrordest`, `knativeerrorcode` and
-`knativeerrordata` attributes added. Without a dead letter sink it is dropped.
+`delivery` is optional; without it you get 10 retries with exponential
+backoff from 0.2 seconds. `retry` is the number of retries after the first
+failed attempt; `backoffPolicy` (`linear` or `exponential`, default
+`exponential`) and `backoffDelay` (ISO 8601, default `PT0.2S`) shape the wait in
+between. `timeout` limits a single request. An event that still failed after the
+last retry goes to `deadLetterSink`, with Knative's `knativeerrordest`,
+`knativeerrorcode` and `knativeerrordata` attributes added. Without a dead
+letter sink it is dropped.
+
+Only answers 5xx, 408 and 429, a sink that cannot be reached and a request
+that times out are retried. Without `timeout` a request may take about 30
+seconds. Any other 4xx drops the event at once, without the dead letter sink.
 
 The Subscription is ready when `READY` is `True`; otherwise `REASON` says what
 is missing. Events start arriving with the next membership change. Deleting the
 Subscription stops delivery.
 
-## Limits in milestone 1
+## Limits
 
-- Events not yet delivered are lost when the in-memory channel restarts.
+- Events are kept for a day at most. A sink that is down longer misses them.

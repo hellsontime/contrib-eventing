@@ -28,7 +28,7 @@ flowchart LR
 | Ingress | Checks who is sending, then hands the event to the broker. Reachable through the platform's Gateway | us |
 | Subscription API | A kcp resource for platform admins in `root:providers:eventing`: event types, optional orgs, target URL, retry settings | us |
 | Subscription controller | Checks the sink against the operator's allowlist, turns each Subscription into a Knative Trigger and reports status back | us |
-| Delivery | Fan-out, filtering by type, retries, dead letters | Knative Eventing |
+| Delivery | Fan-out, filtering by type, retries, dead letters | Knative Eventing, with NATS JetStream as the broker's channel |
 
 ## An event, step by step
 
@@ -55,7 +55,7 @@ The module does not change Platform Mesh components. It needs:
 - an APIExport for the Subscription API, bound in its own workspace;
 - read access to the OpenFGA changelog and tuples;
 - read access to `AccountInfo` through the `core.platform-mesh.io` export, for account paths: a provider connection like the one iam-service gets;
-- Knative Eventing in the cluster, used by eventing only. A NetworkPolicy lets only our ingress reach Knative's broker ingress, and that ingress is shared by every broker in the cluster;
+- Knative Eventing and its NATS JetStream channel in the cluster, used by eventing only. A NetworkPolicy lets only our ingress reach Knative's broker ingress, and that ingress is shared by every broker in the cluster;
 - an HTTPRoute on the platform's Gateway, so publishers outside the cluster can reach the ingress.
 
 If eventing is not installed, Platform Mesh works exactly as before.
@@ -64,8 +64,9 @@ If eventing is not installed, Platform Mesh works exactly as before.
 
 - At least once: a subscriber can get the same event more than once and should ignore duplicates by event `id`.
 - No ordering across events. In particular a role change arrives as two events (revoked and granted) in any order.
-- The broker channel accepts an event before it delivers it, so a subscriber that keeps failing only delays itself.
-- The in-memory channel used for development loses events on restart, including events not yet delivered. Production needs a durable broker class such as Kafka.
+- The broker's channel stores an event in NATS JetStream before the broker accepts it. Every Trigger reads the stream on its own, so a subscriber that keeps failing only delays itself, and a restart of the channel dispatcher or of NATS loses nothing.
+- The stream keeps events for a day and at most 512 MiB. The local setup runs a single NATS server; production wants a NATS cluster.
+- A Trigger gets the events published after it was created, not the ones before. Knative recreates a Trigger's channel subscription when its delivery settings change, and events published in that moment are missed by that Trigger.
 
 ## Known gaps
 
