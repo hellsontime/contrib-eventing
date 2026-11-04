@@ -32,16 +32,19 @@ type fakeKCP struct {
 	accounts map[string]string // cluster/name -> type
 	broken   bool
 	requests int
+	// export is the id in the virtual workspace URL; the slice names it.
+	export     string
+	sliceReads int
 }
-
-const vwPrefix = "/services/apiexport/c-core/core.platform-mesh.io/clusters/"
 
 func (f *fakeKCP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/clusters/root:platform-mesh-system/apis/apis.kcp.io/v1alpha1/apiexportendpointslices/core.platform-mesh.io" {
-		_, _ = fmt.Fprintf(w, `{"status": {"endpoints": [{"url": "%s/services/apiexport/c-core/core.platform-mesh.io"}]}}`, f.srv.URL)
+		f.sliceReads++
+		_, _ = fmt.Fprintf(w, `{"status": {"endpoints": [{"url": "%s/services/apiexport/%s/core.platform-mesh.io"}]}}`, f.srv.URL, f.export)
 		return
 	}
 	f.requests++
+	vwPrefix := "/services/apiexport/" + f.export + "/core.platform-mesh.io/clusters/"
 	if f.broken {
 		http.Error(w, "etcd down", http.StatusInternalServerError)
 		return
@@ -69,6 +72,7 @@ func newFakeKCP(t *testing.T) (*fakeKCP, *PathResolver) {
 	f := &fakeKCP{
 		infos:    map[string]string{"c-acme": "root:orgs:acme", "c-team-a": "root:orgs:acme:team-a"},
 		accounts: map[string]string{"c-orgs/acme": "org", "c-acme/team-a": "account"},
+		export:   "c-core",
 	}
 	f.srv = httptest.NewServer(f)
 	t.Cleanup(f.srv.Close)
@@ -116,6 +120,30 @@ func TestPathResolver(t *testing.T) {
 	f.broken = true
 	_, err = r.Path(ctx, "c-other", "team-a")
 	require.Error(t, err)
+}
+
+func TestPathResolverEndpointsChange(t *testing.T) {
+	f, r := newFakeKCP(t)
+	ctx := context.Background()
+
+	_, err := r.Path(ctx, "c-acme", "team-a")
+	require.NoError(t, err)
+	require.Equal(t, 1, f.sliceReads)
+
+	// The endpoint moved: the old URL knows no cluster any more. The slice is
+	// read again and the new endpoint answers.
+	f.export = "c-moved"
+	path, err := r.Path(ctx, "c-team-a", "team-a")
+	require.NoError(t, err)
+	assert.Equal(t, "root:orgs:acme:team-a:team-a", path)
+	assert.Equal(t, 2, f.sliceReads)
+
+	// A gone workspace reads the slice again for both lookups (AccountInfo,
+	// then Account), finds it unchanged and stays gone.
+	path, err = r.Path(ctx, "c-gone", "team-x")
+	require.NoError(t, err)
+	assert.Empty(t, path)
+	assert.Equal(t, 4, f.sliceReads)
 }
 
 func TestPublishWithPaths(t *testing.T) {

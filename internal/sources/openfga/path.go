@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 
 	"k8s.io/client-go/rest"
@@ -101,13 +102,27 @@ func (r *PathResolver) parentPath(ctx context.Context, cluster, account string) 
 
 // getInCluster reads a core.platform-mesh.io object in a cluster. With more
 // than one shard there is one endpoint per shard; the first that knows the
-// cluster answers.
+// cluster answers. If none does, or one fails, the endpoints may have changed
+// (a shard was added, an endpoint moved), so they are read again and, if they
+// changed, tried once more.
 func (r *PathResolver) getInCluster(ctx context.Context, cluster, resource string, out any) error {
 	if len(r.endpoints) == 0 {
 		if err := r.loadEndpoints(ctx); err != nil {
 			return err
 		}
 	}
+	err := r.getFromEndpoints(ctx, cluster, resource, out)
+	if err == nil {
+		return nil
+	}
+	known := r.endpoints
+	if r.loadEndpoints(ctx) != nil || slices.Equal(known, r.endpoints) {
+		return err
+	}
+	return r.getFromEndpoints(ctx, cluster, resource, out)
+}
+
+func (r *PathResolver) getFromEndpoints(ctx context.Context, cluster, resource string, out any) error {
 	err := errNotFound
 	for _, ep := range r.endpoints {
 		err = r.get(ctx, ep+"/clusters/"+url.PathEscape(cluster)+"/apis/core.platform-mesh.io/v1alpha1/"+resource, out)
@@ -118,6 +133,8 @@ func (r *PathResolver) getInCluster(ctx context.Context, cluster, resource strin
 	return err
 }
 
+// loadEndpoints reads the endpoints of the APIExportEndpointSlice. On error the
+// endpoints known so far stay.
 func (r *PathResolver) loadEndpoints(ctx context.Context) error {
 	var slice struct {
 		Status struct {
@@ -130,12 +147,14 @@ func (r *PathResolver) loadEndpoints(ctx context.Context) error {
 	if err := r.get(ctx, host+"/apis/apis.kcp.io/v1alpha1/apiexportendpointslices/"+url.PathEscape(r.EndpointSlice), &slice); err != nil {
 		return fmt.Errorf("APIExportEndpointSlice %s: %v", r.EndpointSlice, err) //nolint:errorlint // not found here is an error, not a gone workspace
 	}
+	endpoints := make([]string, 0, len(slice.Status.Endpoints))
 	for _, ep := range slice.Status.Endpoints {
-		r.endpoints = append(r.endpoints, strings.TrimSuffix(ep.URL, "/"))
+		endpoints = append(endpoints, strings.TrimSuffix(ep.URL, "/"))
 	}
-	if len(r.endpoints) == 0 {
+	if len(endpoints) == 0 {
 		return fmt.Errorf("APIExportEndpointSlice %s has no endpoints yet", r.EndpointSlice)
 	}
+	r.endpoints = endpoints
 	return nil
 }
 
