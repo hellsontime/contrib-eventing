@@ -21,6 +21,7 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlruntimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -41,6 +42,7 @@ func runOpenFGAAdapter(_ *cobra.Command, _ []string) { // coverage-ignore
 	if cfg.Namespace == "" {
 		log.Fatal().Msg("POD_NAMESPACE or --namespace must be set")
 	}
+	ctrl.SetLogger(log.ComponentLogger("controller-runtime").Logr())
 	ctx, _, shutdown := pmcontext.StartContext(log, cfg, defaultCfg.ShutdownTimeout)
 	defer shutdown()
 

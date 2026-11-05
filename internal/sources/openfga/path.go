@@ -69,7 +69,10 @@ func (p *AccountPaths) Start(ctx context.Context) error {
 	scheme := runtime.NewScheme()
 	// The provider reads the APIExportEndpointSlice and APIBindings with it.
 	utilruntime.Must(kcpapisv1alpha1.AddToScheme(scheme))
-	provider, err := apiexport.New(p.Config, p.EndpointSlice, apiexport.Options{Scheme: scheme})
+	// The provider logs every workspace it sees; keep that for debug, errors
+	// still show.
+	providerLog := p.Log.ComponentLogger("kcp-provider").Logr().V(1)
+	provider, err := apiexport.New(p.Config, p.EndpointSlice, apiexport.Options{Scheme: scheme, Log: &providerLog})
 	if err != nil {
 		return err
 	}
