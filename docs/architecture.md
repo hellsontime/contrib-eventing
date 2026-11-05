@@ -2,6 +2,20 @@
 
 This page explains the parts of the eventing module and how an event travels through them. The reasons behind the choices are in the [decision records](adr/).
 
+## TL;DR
+
+Eventing tells other systems when something changes in the platform, so they don't have to poll for it.
+
+- **Sources.** An adapter watches a system of record and turns each change into an event. Today that is who is a member of which account (OpenFGA changelog). After a change it also sends the full member list of the account, so a consumer can catch up even if it missed events.
+- **Events.** Every event has the same shape: a type, an id, the org it belongs to, and the data (CloudEvents over HTTP, see the [contract](contract.md)).
+- **Ingress.** All events enter through one front door. It checks who is sending before it accepts anything (Kubernetes token review, behind the platform's Gateway).
+- **Broker.** The broker stores each event before it says "accepted", so a restart loses nothing (Knative Eventing with a NATS JetStream channel). It keeps events for a day.
+- **Subscriptions.** A platform admin declares which event types go to which URL, optionally limited to some orgs (a kcp API). A controller turns each one into a delivery rule in the broker (a Knative Trigger).
+- **Delivery.** The broker sends every event to each matching subscriber with an HTTP POST. If the subscriber fails, it retries with growing pauses, then hands the event to a dead letter address if one is set.
+- **Guarantees.** An event arrives at least once and in no particular order. Subscribers should ignore duplicates by event id.
+- **Safety.** Subscribers can only be on hosts the platform operator allows. Their replies are dropped. Network rules keep anyone from skipping the front door (Kubernetes NetworkPolicies).
+- **Optional.** Eventing is a separate module. It changes nothing in the rest of the platform, which works the same without it.
+
 ## The parts
 
 ```mermaid
