@@ -11,7 +11,8 @@ kind_kubectl create namespace "$NS" --dry-run=client -o yaml | kind_kubectl appl
 
 # The second connection lets the OpenFGA adapter read AccountInfo through the
 # core.platform-mesh.io export, to put account paths into events. iam-service
-# gets the same.
+# gets the same. The operator grants all verbs on the export's resources and
+# has no read-only option, though the adapter only reads.
 connections=$(jq -nc --arg ns "$NS" '[{
   path: "root:providers:eventing",
   apiExportNames: ["eventing.platform-mesh.io"],
