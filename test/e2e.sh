@@ -190,6 +190,8 @@ log "Replies from a sink don't reach other subscribers"
 # A sink that answers every snapshot with a forged grant. Knative takes such an
 # answer as a reply and sends it to the broker, which must not accept it. The
 # sink doesn't get grants itself, so a reply that gets through can't loop.
+# Knative counts the blocked reply as a failed delivery: the sink got the event
+# once, and the event also goes to the dead letter sink.
 forged=forged-reply-$RANDOM
 kind_kubectl apply -f - >/dev/null <<YAML
 apiVersion: v1
@@ -199,6 +201,7 @@ data:
   reply: |
     #!/bin/sh
     cat >/dev/null
+    echo "\$HTTP_CE_ID" >>/tmp/got
     printf 'Content-Type: application/json\r\nCe-Id: $forged\r\nCe-Specversion: 1.0\r\nCe-Type: io.platform-mesh.iam.membership.granted.v1alpha1\r\nCe-Source: platform-mesh.io/orgs/$ORG/iam\r\nCe-Pmorg: $ORG\r\n\r\n{"org": "$ORG", "user": {"id": "$forged@example.com"}}'
 ---
 apiVersion: v1
@@ -227,15 +230,28 @@ metadata: {name: e2e-replies}
 spec:
   filter: {types: [io.platform-mesh.iam.account.members.v1alpha1]}
   sink: {uri: http://reply-sink.eventing-demo-sink.svc.cluster.local/cgi-bin/reply}
+  delivery:
+    retry: 1
+    backoffDelay: PT0.2S
+    deadLetterSink: {uri: http://event-display.eventing-demo-sink.svc.cluster.local}
 YAML
 reply_ready() { [[ $(admin get subscription e2e-replies -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}') == True ]]; }
 wait_for "reply Subscription ready" 60 reply_ready
 sleep 5
 before=$(snapshots)
+replied_before=$(sink_logs | grep -c "knativeerrordest: http://broker-ingress" || true)
 add_member "$DEMO_USER" member
 wait_for "the snapshot at event-display" 30 more_snapshots_than "$before"
 sleep 20
 [[ $(sink_logs | grep -c "id: $forged" || true) == 0 ]] && pass "forged reply blocked" || fail "a forged reply reached event-display"
+got=$(kind_kubectl -n eventing-demo-sink exec reply-sink -- cat /tmp/got 2>/dev/null || true)
+[[ $(wc -l <<<"$got") == 1 && -n $got ]] && pass "the replying sink got the snapshot once" || fail "replying sink got: $got"
+# The blocked reply fails only when connecting times out, once per attempt.
+replied() { sink_logs | grep -c "knativeerrordest: http://broker-ingress.knative-eventing.svc.cluster.local/$NS/default" || true; }
+has_replied() { (($(replied) > replied_before)); }
+wait_for "the snapshot at the dead letter sink" 240 has_replied
+[[ $(replied) == $((replied_before + 1)) ]] && pass "the snapshot also went to the dead letter sink" ||
+  fail "dead letters for the reply: $(($(replied) - replied_before))"
 add_member --remove "$DEMO_USER" member
 admin delete subscription e2e-replies --timeout=60s >/dev/null
 kind_kubectl -n eventing-demo-sink delete pod/reply-sink svc/reply-sink cm/reply-sink --wait=false >/dev/null

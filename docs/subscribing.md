@@ -16,7 +16,10 @@ The rules that matter:
 
 - Answer with a 2xx and an **empty body**, quickly. A body that is not a
   CloudEvent counts as a failed delivery. A body that is a CloudEvent is taken
-  as a reply; replies are blocked and dropped, they never reach anyone.
+  as a reply. Replies are blocked and never reach anyone, but Knative counts
+  the blocked reply as a failure: with a dead letter sink, every event you
+  replied to also goes there, about a minute later, with `knativeerrordest`
+  set to the broker.
 - 5xx, 408 and 429 are retried with backoff; any other status is not (see
   below).
 - The same event can arrive more than once. Drop events whose `ce-id` you have
@@ -80,7 +83,8 @@ seconds. Any other 4xx drops the event at once, without the dead letter sink.
 flowchart TD
   send[Event sent to your endpoint] --> answer{Your answer}
   answer -- "2xx, empty body" --> done[Delivered]
-  answer -- "2xx with a CloudEvent" --> reply["Delivered, the reply is dropped"]
+  answer -- "2xx with a CloudEvent" --> reply["Delivered, the reply is blocked"]
+  reply --> dlsset
   answer -- "5xx, 408, 429, timeout,<br/>unreachable, other 2xx body" --> left{Retries left?}
   answer -- other 4xx --> dropped[Dropped]
   left -- yes --> wait[Wait, backoff grows] --> send

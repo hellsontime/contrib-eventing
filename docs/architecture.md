@@ -13,7 +13,7 @@ Eventing tells other systems when something changes in the platform, so they don
 - **Subscriptions.** A platform admin declares which event types go to which URL, optionally limited to some orgs (a kcp API). A controller turns each one into a delivery rule in the broker (a Knative Trigger).
 - **Delivery.** The broker sends every event to each matching subscriber with an HTTP POST. If the subscriber fails, it retries with growing pauses, then hands the event to a dead letter address if one is set.
 - **Guarantees.** An event arrives at least once and in no particular order. Subscribers should ignore duplicates by event id.
-- **Safety.** Subscribers can only be on hosts the platform operator allows. Their replies are dropped. Network rules keep anyone from skipping the front door (Kubernetes NetworkPolicies).
+- **Safety.** Subscribers can only be on hosts the platform operator allows. Their replies are blocked. Network rules keep anyone from skipping the front door (Kubernetes NetworkPolicies).
 - **Optional.** Eventing is a separate module. It changes nothing in the rest of the platform, which works the same without it.
 
 ## The parts
@@ -136,5 +136,5 @@ These are open work:
 - A Subscription deleted while the JetStream channel's controller or dispatcher is down leaves its consumer behind in NATS. It holds no events, since the stream drops old events by age and size anyway; `nats consumer rm` removes it.
 - The allowlist checks the sink's URL. Knative follows redirects, and a 307 or 308 sends the event on to another host. That is no different from a sink that forwards events itself: the allowlist decides who gets events first-hand.
 - The ingress accepts only the platform's own adapters so far. Providers publishing events for their orgs comes in milestone 4.
-- Replies are blocked by the NetworkPolicy in front of the broker ingress. If a subscriber answers with a CloudEvent, Knative's broker filter tries to send it to the broker ingress, which doesn't let it in; the filter retries for a while and drops it. Knative OIDC with an EventPolicy per broker would reject replies properly, but it is alpha and switched on for the whole cluster.
+- Replies are blocked by the NetworkPolicy in front of the broker ingress. If a subscriber answers with a CloudEvent, the channel's dispatcher tries to send it to the broker ingress, which doesn't let it in. It tries as often as the Subscription's retries allow, each attempt ending in a connect timeout, and then sends the original event to the dead letter sink if one is set. The subscriber got the event once. Knative OIDC with an EventPolicy per broker would reject replies properly, but it is alpha and switched on for the whole cluster.
 - The ingress is reachable at `eventing.services.<domain>` through the `terminate-services` listener of the platform Gateway. In the kind setup the platform certificate covers `*.<domain>` but not `*.services.<domain>`, so that host gets Traefik's default certificate.
