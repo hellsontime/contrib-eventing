@@ -138,7 +138,7 @@ func (a *Adapter) publishNew(ctx context.Context, org string, st *orgState) (boo
 		}
 		// The accounts that changed in this page, in order, with their last change.
 		var accounts []membership
-		lastKey := map[string]string{}
+		last := map[string]Change{}
 		for _, c := range changes {
 			m, ok := parseMembership(c.TupleKey)
 			if !ok {
@@ -149,13 +149,13 @@ func (a *Adapter) publishNew(ctx context.Context, org string, st *orgState) (boo
 				return moved, err
 			}
 			id := contract.AccountID(m.cluster, m.account)
-			if _, seen := lastKey[id]; !seen {
+			if _, seen := last[id]; !seen {
 				accounts = append(accounts, m)
 			}
-			lastKey[id] = key
+			last[id] = c
 		}
 		for _, m := range accounts {
-			if err := a.publishMembers(ctx, org, st.StoreID, m, lastKey[contract.AccountID(m.cluster, m.account)]); err != nil {
+			if err := a.publishMembers(ctx, org, st.StoreID, m, last[contract.AccountID(m.cluster, m.account)]); err != nil {
 				return moved, err
 			}
 		}
@@ -175,7 +175,7 @@ func changeKey(c Change) string {
 }
 
 func (a *Adapter) publishChange(ctx context.Context, org string, m membership, c Change, key string) error {
-	path, err := a.accountPath(ctx, m)
+	path, err := a.accountPath(m, c.Timestamp)
 	if err != nil {
 		return err
 	}
@@ -193,10 +193,10 @@ func (a *Adapter) publishChange(ctx context.Context, org string, m membership, c
 	return a.publish(ctx, org, e)
 }
 
-// publishMembers sends the account's members as they are now. A deleted
-// account has none left.
-func (a *Adapter) publishMembers(ctx context.Context, org, storeID string, m membership, key string) error {
-	path, err := a.accountPath(ctx, m)
+// publishMembers sends the account's members as they are now, after its last
+// change. A deleted account has none left.
+func (a *Adapter) publishMembers(ctx context.Context, org, storeID string, m membership, last Change) error {
+	path, err := a.accountPath(m, last.Timestamp)
 	if err != nil {
 		return err
 	}
@@ -210,18 +210,18 @@ func (a *Adapter) publishMembers(ctx context.Context, org, storeID string, m mem
 		AccountID:   contract.AccountID(m.cluster, m.account),
 		AccountPath: path,
 		Members:     members,
-	}, key, time.Now())
+	}, changeKey(last), time.Now())
 	if err != nil {
 		return err
 	}
 	return a.publish(ctx, org, e)
 }
 
-func (a *Adapter) accountPath(ctx context.Context, m membership) (string, error) {
+func (a *Adapter) accountPath(m membership, at time.Time) (string, error) {
 	if a.Paths == nil {
 		return "", nil
 	}
-	return a.Paths.Path(ctx, m.cluster, m.account)
+	return a.Paths.Path(m.cluster, m.account, at)
 }
 
 func (a *Adapter) publish(ctx context.Context, org string, e cloudevents.Event) error {

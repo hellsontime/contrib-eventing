@@ -21,56 +21,23 @@ import (
 	"go.platform-mesh.io/golang-commons/logger/testlogger"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/client-go/rest"
 )
 
-// fakeKCP serves the APIExportEndpointSlice. The watches behind its endpoints
-// are stubbed: tests hand AccountInfos to the paths directly, the way the
-// watch's event handler does.
-type fakeKCP struct {
-	srv *httptest.Server
-	// exports are the ids in the virtual workspace URLs, one per shard.
-	exports []string
-	broken  bool
-	reads   int
-	// watched are the endpoints a watch was started for, synced whether they
-	// have seen all AccountInfos.
-	watched []string
-	synced  bool
-}
-
-func (f *fakeKCP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/clusters/root:platform-mesh-system/apis/apis.kcp.io/v1alpha1/apiexportendpointslices/core.platform-mesh.io" || f.broken {
-		http.Error(w, "nope", http.StatusInternalServerError)
-		return
+// newPaths returns paths that know nothing yet, at a fixed time, with the
+// watch stubbed: tests hand AccountInfos to the paths directly, the way the
+// watch's event handler does, and say whether the watch has synced.
+func newPaths(t *testing.T) (p *AccountPaths, synced *bool, now *time.Time) {
+	synced, now = new(bool), new(time.Time)
+	*synced, *now = true, time.Date(2026, 10, 23, 13, 0, 0, 0, time.UTC)
+	p = &AccountPaths{
+		Grace:       time.Minute,
+		SyncTimeout: 5 * time.Minute,
+		Log:         testlogger.New().HideLogOutput().Logger,
+		synced:      func() bool { return *synced },
+		now:         func() time.Time { return *now },
 	}
-	f.reads++
-	urls := make([]string, 0, len(f.exports))
-	for _, e := range f.exports {
-		urls = append(urls, fmt.Sprintf(`{"url": "%s/services/apiexport/%s/core.platform-mesh.io"}`, f.srv.URL, e))
-	}
-	_, _ = fmt.Fprintf(w, `{"status": {"endpoints": [%s]}}`, strings.Join(urls, ","))
-}
-
-// newFakeKCP returns paths that know nothing yet, at a fixed time.
-func newFakeKCP(t *testing.T) (*fakeKCP, *AccountPaths, *time.Time) {
-	f := &fakeKCP{exports: []string{"c-core"}, synced: true}
-	f.srv = httptest.NewServer(f)
-	t.Cleanup(f.srv.Close)
-	now := time.Date(2026, 10, 23, 13, 0, 0, 0, time.UTC)
-	p := &AccountPaths{
-		Config:        &rest.Config{Host: f.srv.URL + "/clusters/root:platform-mesh-system/"},
-		EndpointSlice: "core.platform-mesh.io",
-		Grace:         time.Minute,
-		Log:           testlogger.New().HideLogOutput().Logger,
-		watch: func(_ context.Context, endpoint string) (func() bool, error) {
-			f.watched = append(f.watched, endpoint)
-			return func() bool { return f.synced }, nil
-		},
-		now: func() time.Time { return now },
-	}
-	require.NoError(t, p.Start(context.Background()))
-	return f, p, &now
+	p.init()
+	return p, synced, now
 }
 
 // accountInfo is an AccountInfo as the watch hands it over.
@@ -86,10 +53,11 @@ func accountInfo(cluster, name, path string) *unstructured.Unstructured {
 }
 
 func TestAccountPaths(t *testing.T) {
-	f, p, _ := newFakeKCP(t)
-	ctx := context.Background()
+	p, synced, now := newPaths(t)
+	*synced = false
 
-	// Orgs and nested accounts alike: each has its own AccountInfo.
+	// Orgs and nested accounts alike: each has its own AccountInfo. Known
+	// accounts don't wait for the watch to sync.
 	p.add(accountInfo("c-orgs", "acme", "root:orgs:acme"))
 	p.add(accountInfo("c-acme", "team-a", "root:orgs:acme:team-a"))
 	p.add(accountInfo("c-team-a", "team-a", "root:orgs:acme:team-a:team-a"))
@@ -98,11 +66,10 @@ func TestAccountPaths(t *testing.T) {
 		{"c-acme", "team-a"}:   "root:orgs:acme:team-a",
 		{"c-team-a", "team-a"}: "root:orgs:acme:team-a:team-a",
 	} {
-		path, err := p.Path(ctx, id[0], id[1])
+		path, err := p.Path(id[0], id[1], *now)
 		require.NoError(t, err)
 		assert.Equal(t, want, path, id)
 	}
-	assert.Empty(t, f.watched, "known accounts need no endpoints")
 
 	// An AccountInfo without the fields we need is ignored.
 	p.add(accountInfo("c-acme", "", "root:orgs:acme:nameless"))
@@ -110,73 +77,84 @@ func TestAccountPaths(t *testing.T) {
 }
 
 func TestAccountPathsUnknown(t *testing.T) {
-	f, p, now := newFakeKCP(t)
-	ctx := context.Background()
+	p, synced, now := newPaths(t)
+	p.add(accountInfo("c-orgs", "acme", "root:orgs:acme"))
 
-	// Until every watch has seen all AccountInfos, nothing is decided.
-	f.synced = false
-	_, err := p.Path(ctx, "c-acme", "team-a")
+	// Until the watch has seen all AccountInfos, nothing is decided, not even
+	// for old changes.
+	*synced = false
+	_, err := p.Path("c-acme", "team-a", now.Add(-time.Hour))
 	require.ErrorContains(t, err, "not loaded yet")
-	assert.Equal(t, []string{f.srv.URL + "/services/apiexport/c-core/core.platform-mesh.io"}, f.watched)
 
 	// A new account whose AccountInfo hasn't arrived yet: try again later.
-	f.synced = true
-	_, err = p.Path(ctx, "c-acme", "team-a")
+	*synced = true
+	changed := *now
+	_, err = p.Path("c-acme", "team-a", changed)
 	require.ErrorContains(t, err, "no AccountInfo for account c-acme/team-a yet")
-	assert.Equal(t, 1, f.reads, "the slice is read again only after a while")
 	*now = now.Add(30 * time.Second)
 	p.add(accountInfo("c-acme", "team-a", "root:orgs:acme:team-a"))
-	path, err := p.Path(ctx, "c-acme", "team-a")
+	path, err := p.Path("c-acme", "team-a", changed)
 	require.NoError(t, err)
 	assert.Equal(t, "root:orgs:acme:team-a", path)
 
 	// An account that never shows up was deleted before we saw it: no path
-	// once the grace period is over.
-	_, err = p.Path(ctx, "c-acme", "gone")
+	// once the change is older than the grace period.
+	_, err = p.Path("c-acme", "gone", now.Add(-59*time.Second))
 	require.Error(t, err)
-	*now = now.Add(time.Minute)
-	path, err = p.Path(ctx, "c-acme", "gone")
+	path, err = p.Path("c-acme", "gone", now.Add(-time.Minute))
 	require.NoError(t, err)
 	assert.Empty(t, path)
 }
 
-func TestAccountPathsEndpointsChange(t *testing.T) {
-	f, p, now := newFakeKCP(t)
-	ctx := context.Background()
-
-	_, err := p.Path(ctx, "c-acme", "team-a")
-	require.Error(t, err)
-	require.Len(t, f.watched, 1)
-
-	// A shard was added. The next unknown account after a while reads the
-	// slice again, and the new endpoint is watched as well.
-	f.exports = append(f.exports, "c-shard-2")
-	*now = now.Add(endpointsReload)
-	_, err = p.Path(ctx, "c-shard-2-ws", "team-b")
-	require.Error(t, err)
-	assert.Equal(t, 2, f.reads)
-	assert.Equal(t, []string{
-		f.srv.URL + "/services/apiexport/c-core/core.platform-mesh.io",
-		f.srv.URL + "/services/apiexport/c-shard-2/core.platform-mesh.io",
-	}, f.watched)
-
-	// If the slice can't be read again, the watches so far go on.
-	f.broken = true
-	*now = now.Add(endpointsReload)
-	_, err = p.Path(ctx, "c-x", "team-x")
-	require.ErrorContains(t, err, "no AccountInfo")
+// After a restart the changelog may hold many changes of accounts deleted
+// meanwhile. None of them waits: their changes are old.
+func TestAccountPathsAfterRestart(t *testing.T) {
+	p, _, now := newPaths(t)
+	p.add(accountInfo("c-orgs", "acme", "root:orgs:acme"))
+	for i := range 100 {
+		path, err := p.Path("c-acme", fmt.Sprintf("deleted-%d", i), now.Add(-2*time.Hour))
+		require.NoError(t, err)
+		assert.Empty(t, path)
+	}
 }
 
-func TestAccountPathsNoSlice(t *testing.T) {
-	f, p, _ := newFakeKCP(t)
-	f.broken = true
-	_, err := p.Path(context.Background(), "c-acme", "team-a")
-	require.ErrorContains(t, err, "APIExportEndpointSlice core.platform-mesh.io")
-	assert.Empty(t, f.watched)
+// The informer of the provider counts as synced before it found any shard.
+func TestAccountPathsNoShardYet(t *testing.T) {
+	p, _, now := newPaths(t)
+	_, err := p.Path("c-acme", "team-a", now.Add(-time.Hour))
+	require.ErrorContains(t, err, "not loaded yet")
+}
+
+// A shard whose AccountInfos never load doesn't hold back changes forever.
+func TestAccountPathsSyncTimeout(t *testing.T) {
+	p, synced, now := newPaths(t)
+	p.add(accountInfo("c-orgs", "acme", "root:orgs:acme"))
+	*synced = false
+	old := now.Add(-time.Hour)
+
+	_, err := p.Path("c-acme", "team-a", old)
+	require.ErrorContains(t, err, "not loaded yet")
+	*now = now.Add(4 * time.Minute)
+	_, err = p.Path("c-acme", "team-a", old)
+	require.ErrorContains(t, err, "not loaded yet")
+	*now = now.Add(time.Minute)
+	path, err := p.Path("c-acme", "team-a", old)
+	require.NoError(t, err)
+	assert.Empty(t, path)
+	assert.True(t, p.warned)
+
+	// Once synced, a later stall waits again from the start.
+	*synced = true
+	_, err = p.Path("c-acme", "team-b", old)
+	require.NoError(t, err)
+	*synced = false
+	_, err = p.Path("c-acme", "team-c", old)
+	require.ErrorContains(t, err, "not loaded yet")
+	assert.False(t, p.warned)
 }
 
 func TestPublishWithPaths(t *testing.T) {
-	_, paths, _ := newFakeKCP(t)
+	paths, _, _ := newPaths(t)
 	paths.add(accountInfo("c-acme", "team-a", "root:orgs:acme:team-a"))
 	fga := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/read") {
