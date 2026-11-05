@@ -50,3 +50,24 @@ spec:
         accessModes: [ReadWriteOnce]
         resources:
           requests: {storage: 1Gi}
+---
+# NATS has no auth here, so anyone who reaches it could read the stream, write
+# events into it past our ingress, or delete it. Only the JetStream channel's
+# controller and dispatcher may connect.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nats
+  namespace: nats-io
+spec:
+  podSelector:
+    matchLabels: {app: nats}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: knative-eventing}
+          podSelector:
+            matchLabels: {messaging.knative.dev/channel: nats-jetstream-channel}
+      ports:
+        - {port: 4222}

@@ -116,7 +116,7 @@ The module does not change Platform Mesh components. It needs:
 - an APIExport for the Subscription API, bound in its own workspace;
 - read access to the OpenFGA changelog and tuples;
 - a watch on `AccountInfo` in all workspaces through the `core.platform-mesh.io` export, for account paths: a provider connection like the one iam-service gets. Paths of deleted accounts stay in memory, so the last events about them still carry the path;
-- Knative Eventing and its NATS JetStream channel in the cluster, used by eventing only. Knative's broker ingress, the channel and the broker filter accept any event from inside the cluster, which is why our own ingress sits in front of them: NetworkPolicies let only our ingress reach the broker ingress, only the broker ingress reach the channel, and only the channel reach the broker filter. These parts are shared by every broker in the cluster;
+- Knative Eventing and its NATS JetStream channel in the cluster, used by eventing only. Knative's broker ingress, the channel and the broker filter accept any event from inside the cluster, which is why our own ingress sits in front of them: NetworkPolicies let only our ingress reach the broker ingress, only the broker ingress reach the channel, and only the channel reach the broker filter. NATS has no auth, so a NetworkPolicy lets only the channel's controller and dispatcher connect to it. These parts are shared by every broker in the cluster;
 - an HTTPRoute on the platform's Gateway, so publishers outside the cluster can reach the ingress.
 
 If eventing is not installed, Platform Mesh works exactly as before.

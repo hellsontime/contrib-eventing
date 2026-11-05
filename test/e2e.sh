@@ -170,6 +170,10 @@ code=$(probe "$(kind_kubectl -n "$NS" get natsjetstreamchannel default-kne-trigg
 trigger=$(kind_kubectl -n "$NS" get triggers -o jsonpath='{.items[0].metadata.name}/{.items[0].metadata.uid}')
 code=$(probe "http://broker-filter.knative-eventing.svc.cluster.local/triggers/$NS/$trigger")
 [[ $code != 200 && $code != 202 ]] && pass "direct post to the broker filter is blocked" || fail "broker filter accepted a forged event"
+# NATS has no auth; a client that gets in sees the server's INFO line.
+nats=$(kind_kubectl -n default run "e2e-probe-$RANDOM" --rm -i --restart=Never --quiet --image=busybox:1.36 --command -- \
+  sh -c 'echo "$(sleep 2 | nc -w 3 nats.nats-io.svc.cluster.local 4222)"' </dev/null 2>/dev/null || true)
+[[ $nats != *INFO* ]] && pass "NATS is closed to other pods" || fail "another pod reached NATS"
 code=$(probe http://ingress.contrib-eventing.svc.cluster.local)
 [[ $code == 401 ]] && pass "ingress without token: 401" || fail "ingress without token: $code"
 token=$(kind_kubectl -n default create token default --audience contrib-eventing)
