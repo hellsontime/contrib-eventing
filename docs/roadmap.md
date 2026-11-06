@@ -12,6 +12,7 @@ Each milestone ends with something that runs on a local kind setup.
    events, subscription targets limited by an allowlist the platform operator
    controls, replies from subscribers blocked, a durable channel (NATS
    JetStream) instead of the in-memory one, timeouts and dead letter sinks.
+   The plan and its reasons: [milestone 2](milestone-2.md).
 3. **Keycloak events.** Login, user created and user deleted, from a Keycloak
    adapter. A prototype for login exists.
 4. **Installable module.** Published images and chart, install through
