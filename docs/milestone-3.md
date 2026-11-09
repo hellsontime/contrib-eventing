@@ -1,7 +1,8 @@
 # Milestone 3
 
-Goal: Keycloak events reach subscribers the same way membership events do:
-login, user created, user deleted. Snapshots get names.
+Goal: Keycloak logins reach subscribers the same way membership events do.
+Snapshots get names. User created and deleted are not part of this milestone,
+see decision 4.
 
 Draft for discussion. It builds on milestone 2 (snapshots, account path).
 
@@ -27,19 +28,17 @@ be a problem.
 
 ## Work
 
-1. **Keycloak access.** A client with a service account for the adapter, see
-   decision 1.
-2. **Event store per realm.** Store `LOGIN` and `REGISTER` user events and the
-   admin events for users, with a retention time. When security-operator
-   updates a realm it only sends the fields it manages, and Keycloak leaves
-   fields that are not sent as they are (checked in the 26.7.2 source), so it
-   won't switch the store off again. Who switches it on: decision 2.
-3. **Events.** New types next to the membership ones, same envelope (`source`
-   per org, `pmorg`, `user.id` as in the contract):
+1. **Keycloak access.** A client with a service account for the adapter that
+   only has `view-events` and `view-users`, see decision 1.
+2. **Event store per realm.** Store `LOGIN` user events only (no `REGISTER`, no
+   admin events), with a retention time of 7 days, configurable. When
+   security-operator updates a realm it only sends the fields it manages, and
+   Keycloak leaves fields that are not sent as they are (checked in the 26.7.2
+   source), so it won't switch the store off again. Who switches it on:
+   decision 2.
+3. **Events.** One new type next to the membership ones, same envelope
+   (`source` per org, `pmorg`, `user.id` as in the contract):
    - `io.platform-mesh.iam.user.loggedin.v1alpha1` from `LOGIN`
-   - `io.platform-mesh.iam.user.created.v1alpha1` from `REGISTER` and admin
-     `CREATE` on a user (invites)
-   - `io.platform-mesh.iam.user.deleted.v1alpha1` from admin `DELETE` on a user
 
    No IP address or session id in the events. Keycloak events carry the
    Keycloak user id and the username. security-operator creates every realm
@@ -49,7 +48,7 @@ be a problem.
 4. **Names in snapshots.** The snapshot event from milestone 2 gets first and
    last name, read with `view-users` and cached.
 5. **Docs and test.** Contract, subscribing guide, OpenAPI spec for the new
-   types; e2e logs a test user in and checks the event.
+   type; e2e logs a test user in and checks the event.
 
 ## Decisions
 
@@ -59,24 +58,30 @@ security-operator, so its owners have to agree.
 1. **Keycloak access.** Keycloak creates a management client in `master` for
    every realm, and the `master` admin role picks up its roles automatically
    (Keycloak 26.7.2 source, `RealmManager`). Narrow roles (`view-events`,
-   `view-users`, `manage-events`) have to be granted again for every new realm.
+   `view-users`) have to be granted again for every new realm.
    - a) Admin role in `master`, through security-operator's init container,
      which already creates the clients for security-operator and iam-service
      and gives them admin. One more entry in its client list.
    - b) Narrow roles per realm, granted by security-operator when it creates a
-     realm. Least privilege, but a code change in security-operator.
+     realm, with a reader client in `master`, behind a flag. Least privilege,
+     but a code change in security-operator.
    - c) Narrow roles per realm, granted by our install script. Breaks for every
      org created later.
 
-   **Proposal: a) now**, like the other Platform Mesh components, and b) as a
-   follow-up with the security-operator owners.
+   **Decided: b)**: security-operator grants a reader client in `master`
+   `view-events` and `view-users` per realm behind a flag
+   (platform-mesh/platform-mesh#578). The adapter never gets admin or
+   `manage-events`. Until #578 lands, a local install step does the same job
+   and is marked as a stopgap.
 2. **Who switches the event store on.**
    - a) The adapter, for every realm it finds. It only adds the types it needs
      and keeps what others configured (the prototype does that).
    - b) security-operator, behind a flag, when it creates or updates a realm.
 
-   **Proposal: a)**, it works with a) of decision 1 and needs no change in
-   security-operator; we ask its owners to accept it.
+   **Decided: b)**: security-operator switches the store on per realm, same
+   issue (platform-mesh/platform-mesh#578). The adapter has no
+   `manage-events`. Until then a local install step does it, marked as a
+   stopgap.
 3. **The `welcome` realm.** Users register and first log in there, before they
    belong to an org, so its events have no org.
    - a) Skip it. Every event keeps `pmorg`, and org filters work as before.
@@ -91,8 +96,10 @@ security-operator, so its owners have to agree.
    - a) Logins only in this milestone.
    - b) All three.
 
-   **Proposal: b), in that order**: logins first, created and deleted last, so
-   they can move out if time runs short.
+   **Decided: a)**: user created and deleted move out of this milestone. They
+   will come from the `User` CRD of ADR 018 (platform-mesh/architecture#62),
+   so they work with any IdP. Login stays per IdP and only exists with the
+   bundled Keycloak.
 5. **Retention and gaps.** Keycloak deletes stored events after the retention
    time. If the adapter is down longer, those events are lost. Snapshots heal
    member lists, but a lost login stays lost.
@@ -114,13 +121,12 @@ security-operator, so its owners have to agree.
 
 ## Order
 
-1. Agree decisions 1 and 2 with the security-operator owners; set up access
-   and the event store.
+1. Set up access and the event store (stopgap install step until
+   platform-mesh/platform-mesh#578).
 2. Logins end to end: port the prototype to one stream for all orgs and the
    current contract.
 3. Names in snapshots.
-4. User created and deleted.
-5. Docs and e2e alongside each step.
+4. Docs and e2e alongside each step.
 
-Not in this milestone: chart and `ManagedProvider` install, durable broker
+Not in this milestone: user created and deleted (ADR 018), chart and `ManagedProvider` install, durable broker
 (milestone 4), org-level subscriptions.
