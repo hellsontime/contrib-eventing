@@ -4,7 +4,7 @@ Goal: Keycloak logins reach subscribers the same way membership events do.
 Snapshots get names. User created and deleted are not part of this milestone,
 see decision 4.
 
-Draft for discussion. It builds on milestone 2 (snapshots, account path).
+It builds on milestone 2 (snapshots, account path).
 
 ## What the first consumer needs
 
@@ -40,7 +40,8 @@ be a problem.
    (`source` per org, `pmorg`, `user.id` as in the contract):
    - `io.platform-mesh.iam.user.loggedin.v1alpha1` from `LOGIN`
 
-   No IP address or session id in the events. Keycloak events carry the
+   The type has no Keycloak details, so an adapter for another IdP can send
+   the same events later. No IP address or session id in the events. Keycloak events carry the
    Keycloak user id and the username. security-operator creates every realm
    with `registrationEmailAsUsername`, so the username is the email, which is
    `user.id` with the default claim. With the `sub` claim, `user.id` is the
@@ -85,8 +86,8 @@ security-operator, so its owners have to agree.
 3. **The `welcome` realm.** Users register and first log in there, before they
    belong to an org, so its events have no org.
    - a) Skip it. Every event keeps `pmorg`, and org filters work as before.
-     We lose self-registrations as `user.created`; invites still show up in the
-     org's realm.
+     Self-registrations happen there, which only matters once user created
+     exists (decision 4).
    - b) Send its events without `pmorg`. Needs a contract change and
      subscribers have to cope with events without an org.
 
@@ -117,7 +118,8 @@ security-operator, so its owners have to agree.
 
    **Proposal: b)**: the RFC has to be agreed before the module is published,
    and provider publishing is its own design (auth for senders outside the
-   cluster).
+   cluster). Milestone 2 already moved provider publishing into milestone 4,
+   next to the installable module; splitting them is part of this decision.
 
 ## Order
 
@@ -128,5 +130,6 @@ security-operator, so its owners have to agree.
 3. Names in snapshots.
 4. Docs and e2e alongside each step.
 
-Not in this milestone: user created and deleted (ADR 018), chart and `ManagedProvider` install, durable broker
-(milestone 4), org-level subscriptions.
+Not in this milestone: user created and deleted (ADR 018), chart and
+`ManagedProvider` install, provider publishing (milestone 4), org-level
+subscriptions.
