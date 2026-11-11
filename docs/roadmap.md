@@ -13,13 +13,15 @@ Each milestone ends with something that runs on a local kind setup.
    controls, replies from subscribers blocked, a durable channel (NATS
    JetStream) instead of the in-memory one, timeouts and dead letter sinks.
    The plan and its reasons: [milestone 2](milestone-2.md).
-3. **Keycloak events.** Login, user created and user deleted, from a Keycloak
-   adapter. A prototype for login exists.
+3. **Logins and names.** Login events from the Keycloak event store, and first
+   and last names in member snapshots. security-operator provides the event
+   store and read-only Keycloak access. Details: [milestone 3](milestone-3.md).
 4. **Installable module.** Published images and chart, install through
    `ManagedProvider`, automatic binding for new orgs, more than one shard,
    installations other than kind. Providers get a way to publish their own
    events through the ingress.
-5. **Later.** Org- and account-level subscriptions, kcp resource events.
+5. **Later.** User created and deleted from the `User` CRD of ADR 018, for any
+   IdP. Org- and account-level subscriptions, kcp resource events.
 
 Delivery stays HTTP to the subscriber in all of these. Bridges to GCP Pub/Sub,
 Kafka and the like run on the subscriber side.
