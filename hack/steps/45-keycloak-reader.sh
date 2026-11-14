@@ -11,7 +11,7 @@
 #
 # Orgs created after this ran are not covered until #578 lands; running
 # ./hack/install.sh again covers them. What was changed is recorded in the
-# ConfigMap keycloak-reader-stopgap, so uninstall.sh can undo exactly that.
+# ConfigMap eventing-keycloak-reader-stopgap, so uninstall.sh can undo exactly that.
 
 KEYCLOAK_READER=contrib-eventing-keycloak-reader
 # How long Keycloak keeps stored events, in seconds. Logins older than this are
@@ -44,13 +44,13 @@ if [[ -z $reader_uuid ]]; then
 fi
 reader_sa=$(keycloak GET "/admin/realms/master/clients/$reader_uuid/service-account-user" | jq -r .id)
 
-kind_kubectl -n "$NS" create configmap keycloak-reader-stopgap --dry-run=client -o yaml |
+kind_kubectl -n "$NS" create configmap eventing-keycloak-reader-stopgap --dry-run=client -o yaml |
   kind_kubectl -n "$NS" create -f - >/dev/null 2>&1 || true
 
 # record <realm|client> <enabled|added-login|created>: adds the key, never rewrites one.
 record() {
-  if [[ -z $(kind_kubectl -n "$NS" get configmap keycloak-reader-stopgap -o "jsonpath={.data['$1']}") ]]; then
-    kind_kubectl -n "$NS" patch configmap keycloak-reader-stopgap --type merge \
+  if [[ -z $(kind_kubectl -n "$NS" get configmap eventing-keycloak-reader-stopgap -o "jsonpath={.data['$1']}") ]]; then
+    kind_kubectl -n "$NS" patch configmap eventing-keycloak-reader-stopgap --type merge \
       -p "$(jq -nc --arg r "$1" --arg v "$2" '{data: {($r): $v}}')" >/dev/null
   fi
 }

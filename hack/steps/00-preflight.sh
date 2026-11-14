@@ -1,11 +1,16 @@
 # Checks that Platform Mesh is up and stores the credentials the other steps need.
 
-for tool in kubectl docker curl jq base64; do
+for tool in kubectl helm docker curl jq base64; do
   command -v "$tool" >/dev/null || die "$tool is not installed"
 done
 
 kind_kubectl -n platform-mesh-system wait --for=condition=Ready platformmesh/platform-mesh --timeout=10s >/dev/null ||
   die "PlatformMesh is not Ready in context $KUBE_CONTEXT"
+
+# The platform-mesh-operator installs ManagedProviders with Flux.
+for crd in ocirepositories.source.toolkit.fluxcd.io helmreleases.helm.toolkit.fluxcd.io managedproviders.providers.platform-mesh.io; do
+  kind_kubectl get crd "$crd" >/dev/null 2>&1 || die "CRD $crd is missing, Platform Mesh is installed without it"
+done
 
 mkdir -p "$SECRET_DIR"
 kind_kubectl -n platform-mesh-system get secret kubeconfig-kcp-admin -o jsonpath='{.data.kubeconfig}' |
