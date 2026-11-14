@@ -50,9 +50,9 @@ needs for account paths (milestone 2). That stays an
 
 1. **CI.** Build, unit tests, lint and the kind e2e on every pull request.
 2. **Images.** Multi-arch images to ghcr on every tag.
-3. **Chart.** Controller, ingress, adapters, CRD and NetworkPolicies from
+3. **Chart.** Controller, ingress, adapters and NetworkPolicies from
    `config/`, configured by values instead of `${VAR}` substitution. The kind
-   only parts (`hostAliases` to Traefik, local image) stay in the demo.
+   only parts (`hostAliases` to Traefik, local image) are values the demo sets.
 4. **kcp setup in the chart.** The schema, the APIExport and its binding are
    applied with the provider kubeconfig when eventing starts, instead of
    `20-kcp-provider.sh` with the kcp admin. The workspace name is no longer
@@ -106,6 +106,10 @@ needs for account paths (milestone 2). That stays an
    - b) The chart installed with helm, the kcp parts by script.
 
    **Proposal: a)**: otherwise the documented path is never tested.
+5. **Namespace.** A `ManagedProvider` has to be in the namespace of its
+   `PlatformMesh`, and the operator installs the chart there. So eventing runs
+   in `platform-mesh-system`, next to the platform. Names get an `eventing-`
+   prefix, the NetworkPolicies stay in `knative-eventing`.
 
 ## Part 2: providers publish their own events
 

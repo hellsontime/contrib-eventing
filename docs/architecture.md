@@ -25,7 +25,7 @@ flowchart LR
     kc[(Keycloak)]
     info["AccountInfo<br/>in every account workspace"]
   end
-  subgraph Admin["root:providers:eventing"]
+  subgraph Admin["root:providers:eventing-&lt;id&gt;"]
     sub[Subscription]
   end
   subgraph Module[Eventing module]
@@ -63,7 +63,7 @@ Knative be reached only from the part before it (see
 | OpenFGA adapter | Reads the OpenFGA changelog and turns membership changes into events, plus a snapshot of the members of each changed account. If it can reach Keycloak (`view-users`), the snapshot has first and last names | us |
 | Keycloak adapter | Reads the login events stored by each org realm and turns them into `user.loggedin` events. Its Keycloak client only has `view-events` and `view-users` | us |
 | Ingress | Checks who is sending, then hands the event to the broker. Reachable through the platform's Gateway | us |
-| Subscription API | A kcp resource for platform admins in `root:providers:eventing`: event types, optional orgs, target URL, retry settings | us |
+| Subscription API | A kcp resource for platform admins in the eventing workspace: event types, optional orgs, target URL, retry settings | us |
 | Subscription controller | Checks the sink against the operator's allowlist, turns each Subscription into a Knative Trigger and reports status back | us |
 | Delivery | Fan-out, filtering by type, retries, dead letters | Knative Eventing, with NATS JetStream as the broker's channel |
 
@@ -118,7 +118,7 @@ The Keycloak adapter works the same way, with Keycloak's event store instead of 
 
 ## Tenancy
 
-Subscriptions are for platform admins. They live in the provider workspace `root:providers:eventing`, which binds its own export. The export has no `APIExportPolicy`, so orgs cannot bind it.
+Subscriptions are for platform admins. They live in eventing's provider workspace `root:providers:eventing-<id>`, which the platform-mesh-operator creates for the `ManagedProvider` and which binds its own export. The export has no `APIExportPolicy`, so orgs cannot bind it.
 
 One broker carries the events of all orgs. Every event names its org in `pmorg`, and a Subscription can be limited to some orgs.
 
@@ -126,9 +126,9 @@ Org-level and account-level subscriptions are on the [roadmap](roadmap.md).
 
 ## How it plugs in
 
-The module does not change Platform Mesh components. It needs:
+The module does not change Platform Mesh components. It is installed through a `ManagedProvider` in `platform-mesh-system`: the platform-mesh-operator creates its workspace, hands it a kubeconfig for it and installs the chart with Flux into the same namespace. It needs:
 
-- an APIExport for the Subscription API, bound in its own workspace;
+- an APIExport for the Subscription API, bound in its own workspace. An init container of the controller applies both with the provider kubeconfig;
 - read access to the OpenFGA changelog and tuples;
 - a watch on `AccountInfo` in all workspaces through the `core.platform-mesh.io` export, for account paths: a provider connection like the one iam-service gets. Paths of deleted accounts stay in memory, so the last events about them still carry the path. A change of an account the adapter doesn't know waits up to a minute after the change for its `AccountInfo`; older changes of unknown accounts are of accounts deleted meanwhile and go out without a path. If a shard's `AccountInfo`s don't load within five minutes, the adapter stops waiting for them;
 - Knative Eventing and its NATS JetStream channel in the cluster, used by eventing only. Knative's broker ingress, the channel and the broker filter accept any event from inside the cluster, which is why our own ingress sits in front of them: NetworkPolicies let only our ingress reach the broker ingress, only the broker ingress reach the channel, and only the channel reach the broker filter. NATS has no auth, so a NetworkPolicy lets only the channel's controller and dispatcher connect to it. These parts are shared by every broker in the cluster;
@@ -149,7 +149,7 @@ If eventing is not installed, Platform Mesh works exactly as before.
 
 These are open work:
 
-- **Keycloak access is a stopgap.** Until platform-mesh/platform-mesh#578 lands, `hack/steps/45-keycloak-reader.sh` creates the reader client in `master`, grants it `view-events` and `view-users` on every org realm that exists at install time, and switches those realms' event stores on for `LOGIN`. Orgs created later are not covered until #578 lands or the install runs again. The step records what it changed in the ConfigMap `keycloak-reader-stopgap`, and `hack/uninstall.sh` reverts exactly that, deleting the reader client only if the step created it. When security-operator runs with `--idp-events-reader-client` (platform-mesh/platform-mesh#606), the step does nothing: security-operator owns the client, its roles and the event store, and the secret with the keys `client_id` and `client_secret` has to be copied into the `contrib-eventing` namespace.
+- **Keycloak access is a stopgap.** Until platform-mesh/platform-mesh#578 lands, `hack/steps/45-keycloak-reader.sh` creates the reader client in `master`, grants it `view-events` and `view-users` on every org realm that exists at install time, and switches those realms' event stores on for `LOGIN`. Orgs created later are not covered until #578 lands or the install runs again. The step records what it changed in the ConfigMap `eventing-keycloak-reader-stopgap`, and `hack/uninstall.sh` reverts exactly that, deleting the reader client only if the step created it. When security-operator runs with `--idp-events-reader-client` (platform-mesh/platform-mesh#606), the step does nothing: security-operator owns the client, its roles and the event store, and the secret with the keys `client_id` and `client_secret` has to be copied into `platform-mesh-system` as `contrib-eventing-keycloak-reader`.
 - **Logins can be lost.** The event store keeps events for seven days (configurable at install). If the Keycloak adapter is down for longer, the logins in between are never published. Without Keycloak access, there are no login events and no names.
 
 - A Subscription deleted while the JetStream channel's controller or dispatcher is down leaves its consumer behind in NATS. It holds no events, since the stream drops old events by age and size anyway; `nats consumer rm` removes it.

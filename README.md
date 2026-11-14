@@ -42,12 +42,95 @@ More detail: [architecture](docs/architecture.md), [event contract](docs/contrac
 
 What comes after is in the [roadmap](docs/roadmap.md).
 
+## Install
+
+Eventing is installed through a `ManagedProvider`: the platform-mesh-operator
+creates eventing's workspace in kcp, `root:providers:eventing-<id>`, and
+installs the chart with Flux into `platform-mesh-system`. Platform Mesh's
+prerequisites chart brings Flux and the ocm-controller.
+
+1. **Knative Eventing and NATS JetStream.** Knative in that cluster must be
+   used by eventing only (see
+   [architecture](docs/architecture.md#how-it-plugs-in)), and the CNI must
+   enforce NetworkPolicies. `hack/steps/10-knative.sh` sets up all of this:
+   - Knative Eventing (v1.23) with the channel based broker and its NATS
+     JetStream channel.
+   - NATS with JetStream on a volume. NATS has no auth, so lock it down like
+     the NetworkPolicy in [`config/nats/nats.yaml`](config/nats/nats.yaml):
+     only the JetStream channel's controller and dispatcher (pods with
+     `messaging.knative.dev/channel: nats-jetstream-channel` in
+     `knative-eventing`) may connect. Otherwise any pod can write events into
+     the stream past eventing's ingress.
+   - [`config-nats`](config/nats/config-nats.yaml), which tells the channel
+     where NATS is.
+   - [`config-br-default-channel`](config/nats/config-br-default-channel.yaml),
+     which makes the JetStream channel the default for new Brokers.
+
+   The chart refuses to install without Knative and the JetStream default
+   channel. It does not check NATS.
+2. **The core connection.** Add the entry in
+   [`config/install/core-connection.yaml`](config/install/core-connection.yaml)
+   to the `PlatformMesh`'s `spec.kcp.extraProviderConnections`. The OpenFGA
+   adapter reads account paths with it.
+3. **Keycloak access** (optional), for login events and names:
+   security-operator with
+   `--idp-events-reader-client=contrib-eventing-keycloak-reader`
+   ([platform-mesh/platform-mesh#606](https://github.com/platform-mesh/platform-mesh/pull/606)),
+   and the client's credentials in the Secret `contrib-eventing-keycloak-reader`
+   (keys `client_id`, `client_secret`) in `platform-mesh-system`. Then set
+   `keycloak.readerSecret: contrib-eventing-keycloak-reader`; the chart refuses
+   to install if that Secret is missing. Without it there are no login events
+   and no names.
+4. **The ManagedProvider.** Apply
+   [`config/install/managedprovider.yaml`](config/install/managedprovider.yaml)
+   (from the OCM component) or
+   [`managedprovider-flux.yaml`](config/install/managedprovider-flux.yaml)
+   (the chart only) with your base domain, the hosts sinks may point at and
+   the user claim. All values are in
+   [`charts/eventing/values.yaml`](charts/eventing/values.yaml).
+
+Subscriptions go into eventing's workspace, which a platform admin finds in
+`root:providers`:
+
+```sh
+kubectl get workspaces   # in root:providers: eventing-<id>
+```
+
+How to subscribe is in
+[receiving events](docs/subscribing.md), what delivery guarantees in
+[architecture](docs/architecture.md#delivery-guarantees).
+
+### Removing eventing
+
+Deleting the `ManagedProvider` uninstalls the chart, but not everything goes
+with it. The controller creates the Broker `default` in `platform-mesh-system`
+and a Trigger per Subscription itself, so they stay, and so do the workspace
+and the Subscriptions unless `cleanupOnDelete` is true. The chart keeps its
+NetworkPolicies in `knative-eventing` on uninstall, because without them any
+pod could send events straight to the Broker and every remaining subscriber
+would get them. To remove eventing completely, in this order:
+
+1. Delete the Subscriptions in eventing's workspace. The controller removes
+   their Triggers. With `cleanupOnDelete: true` this has to come first,
+   otherwise the Subscriptions' finalizer blocks the workspace deletion.
+2. Delete the `ManagedProvider`.
+3. Delete the Broker and wait until it is gone:
+   `kubectl -n platform-mesh-system delete broker default`.
+4. Only then delete the NetworkPolicies:
+   `kubectl -n knative-eventing delete networkpolicy -l app.kubernetes.io/name=eventing,app.kubernetes.io/instance=eventing`.
+5. What else is left: the adapters' state ConfigMaps
+   (`eventing-*-adapter-state`) and the core connection.
+
+`hack/uninstall.sh` does it in that order.
+
 ## Try it locally
 
 You need a local Platform Mesh on kind, installed as described in
 [helm-charts/installation](https://github.com/platform-mesh/helm-charts/tree/main/installation),
-and `kubectl`, `docker`, `curl` and `jq`. The install adds Knative Eventing and a
-single NATS JetStream server; Knative in that cluster must be used by eventing only (see [architecture](docs/architecture.md#how-it-plugs-in)).
+and `kubectl`, `helm`, `docker`, `curl` and `jq`. The install adds Knative
+Eventing and a single NATS JetStream server, builds the image into kind, puts
+the chart into a registry container `kind-registry` and applies the
+`ManagedProvider`.
 
 ```sh
 ./hack/install.sh     # adds eventing, a subscribed sink and a demo org eventing-demo
@@ -55,8 +138,9 @@ single NATS JetStream server; Knative in that cluster must be used by eventing o
 kubectl -n eventing-demo-sink logs deploy/event-display
 ```
 
-The install also sets up read-only access to Keycloak, as a stopgap until Platform
-Mesh provides it ([platform-mesh/platform-mesh#578](https://github.com/platform-mesh/platform-mesh/issues/578)):
+Unless security-operator manages the Keycloak reader client, the install also
+sets up read-only access to Keycloak, as a stopgap until Platform Mesh provides
+it ([platform-mesh/platform-mesh#578](https://github.com/platform-mesh/platform-mesh/issues/578)):
 a client in the `master` realm with only `view-events` and `view-users` on the org realms, and the
 event store of the org realms switched on for logins, with 7 days of retention
 (`KEYCLOAK_EVENTS_RETENTION`, in seconds). `hack/uninstall.sh` undoes exactly that. Orgs created
@@ -67,7 +151,23 @@ The sink shows a `membership.granted` event. `./hack/add-member.sh --remove`
 takes the role away again, `./test/e2e.sh` checks the whole path,
 `./test/install-check.sh --uninstall` checks that installing again changes
 nothing and uninstalling leaves nothing, and `./hack/uninstall.sh` removes
-everything.
+everything. CI runs the same on a released Platform Mesh
+(`test/platform-mesh.sh`).
+
+## Releases
+
+A `v<version>` tag publishes the image `ghcr.io/platform-mesh/contrib-eventing`,
+the chart `oci://ghcr.io/platform-mesh/contrib-eventing/charts/eventing` and
+the OCM component `github.com/platform-mesh/contrib-eventing` in
+`ghcr.io/platform-mesh`, all with the version without the `v`.
+
+To try the OCM path on kind, build the component with
+`hack/ocm-component.sh <version> <image> ctf`, push it with
+`ocm transfer ctf --overwrite ctf http://kind-registry:5000/ocm` (the image has
+to be in a registry too, the component pins its digest) and set
+`registry: http://kind-registry:5000/ocm` and `insecure: true` in the
+`ManagedProvider`. The chart uses the component's image; unless the kind node
+can pull from that registry, keep the `image` values `hack/install.sh` sets.
 
 ## Background
 
