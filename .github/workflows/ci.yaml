@@ -1,0 +1,124 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Every commit on main gets a finished run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+      - run: go build ./...
+      - run: go test ./...
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+      # Same version as the Platform Mesh monorepo.
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.13.2
+
+  generated:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+      - run: hack/generate.sh
+      # apigen puts the date and commit into the schema name, so that may differ.
+      - name: Check generated files are up to date
+        run: |
+          git diff --exit-code -I '^  name: v[0-9]' -I '^      schema: v[0-9]' || {
+            echo "::error::generated files are out of date, run hack/generate.sh"
+            exit 1
+          }
+
+  chart:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
+      - run: helm lint --strict charts/eventing -f charts/eventing/ci/test-values.yaml
+      # The chart refuses to render without Knative and its NATS channel. With
+      # and without the Keycloak adapter.
+      - run: |
+          for secret in contrib-eventing-keycloak-reader ""; do
+            helm template eventing charts/eventing -n platform-mesh-system \
+              -f charts/eventing/ci/test-values.yaml --set keycloak.readerSecret="$secret" \
+              -a eventing.knative.dev/v1/Broker \
+              -a eventing.knative.dev/v1/Trigger \
+              -a messaging.knative.dev/v1alpha1/NatsJetStreamChannel >/dev/null
+          done
+
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      # Picks up .shellcheckrc.
+      - uses: ludeeus/action-shellcheck@00cae500b08a931fb5698e11e79bfbd38e612a38 # 2.0.0
+
+  # A released Platform Mesh on kind, as in its installation guide, and
+  # eventing through the ManagedProvider from a local registry.
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    needs: [test, chart]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
+      - uses: helm/kind-action@ea822c7bf1874f08e5a491df991c228edffc3376 # v1.15.2
+        with:
+          cluster_name: platform-mesh
+          node_image: kindest/node:v1.35.1
+          config: test/kind.yaml
+      - run: test/platform-mesh.sh
+      - run: hack/install.sh
+      - run: test/e2e.sh
+      - run: test/install-check.sh --uninstall
+      - name: Collect cluster state
+        if: failure()
+        run: |
+          mkdir -p state
+          kubectl get pods -A -o wide >state/pods.txt 2>&1 || true
+          kubectl get events -A --sort-by=.lastTimestamp >state/events.txt 2>&1 || true
+          kubectl -n platform-mesh-system get platformmesh,managedprovider,helmrelease,ocirepository -o yaml >state/platform-mesh.yaml 2>&1 || true
+          for d in $(kubectl -n platform-mesh-system get deploy -l app.kubernetes.io/name=eventing -o name 2>/dev/null); do
+            kubectl -n platform-mesh-system logs "$d" --all-containers >"state/${d#*/}.log" 2>&1 || true
+          done
+          kubectl -n platform-mesh-system logs deploy/platform-mesh-operator >state/platform-mesh-operator.log 2>&1 || true
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-state
+          path: state/
