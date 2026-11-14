@@ -29,7 +29,7 @@ import (
 
 const (
 	// StateConfigMap holds, per realm, how far the adapter got in the events.
-	StateConfigMap = "keycloak-adapter-state"
+	StateConfigMap = "eventing-keycloak-adapter-state"
 	pageSize       = 50
 
 	// ClaimEmail and ClaimSub are the user claims the adapter can follow.

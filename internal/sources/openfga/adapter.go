@@ -27,7 +27,7 @@ import (
 
 const (
 	// StateConfigMap holds, per org, how far the adapter got in the changelog.
-	StateConfigMap = "openfga-adapter-state"
+	StateConfigMap = "eventing-openfga-adapter-state"
 	pageSize       = 50
 )
 

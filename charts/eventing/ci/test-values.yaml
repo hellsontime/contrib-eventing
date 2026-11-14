@@ -1,0 +1,9 @@
+# For helm lint and helm template in CI.
+image:
+  tag: test
+allowedSinkHosts: ["*.example.svc.cluster.local"]
+httpRoute:
+  baseDomain: portal.localhost
+hostAliases:
+  - ip: 10.96.188.4
+    hostnames: [kcp.api.portal.localhost, root.kcp.portal.localhost]

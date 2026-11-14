@@ -1,0 +1,27 @@
+{{- /* Eventing needs Knative Eventing and its NATS JetStream channel; they are prerequisites, see the README. */}}
+{{- range list "eventing.knative.dev/v1/Broker" "eventing.knative.dev/v1/Trigger" "messaging.knative.dev/v1alpha1/NatsJetStreamChannel" }}
+{{- if not ($.Capabilities.APIVersions.Has .) }}
+{{- fail (printf "%s is not in the cluster: eventing needs Knative Eventing with the NATS JetStream channel installed first" .) }}
+{{- end }}
+{{- end }}
+{{- /* Without it the Broker gets Knative's in-memory channel, which loses events on restarts. Not checked by helm template. */}}
+{{- with lookup "v1" "ConfigMap" .Values.knative.namespace "config-br-default-channel" }}
+{{- if not (contains "NatsJetStreamChannel" (index (.data | default dict) "channel-template-spec" | default "")) }}
+{{- fail (printf "ConfigMap %s/config-br-default-channel does not make NatsJetStreamChannel the default channel of new Brokers" $.Values.knative.namespace) }}
+{{- end }}
+{{- end }}
+{{- if not .Values.kcp.kubeconfigSecret }}
+{{- fail "kcp.kubeconfigSecret must name the provider kubeconfig Secret" }}
+{{- end }}
+{{- if not (has .Values.userClaim (list "email" "sub")) }}
+{{- fail "userClaim must be email or sub" }}
+{{- end }}
+{{- if and .Values.httpRoute.enabled (not .Values.httpRoute.baseDomain) }}
+{{- fail "httpRoute.baseDomain must be set, or httpRoute.enabled false" }}
+{{- end }}
+{{- /* Otherwise the Keycloak adapter waits for the Secret forever. Not checked by helm template: lookup finds no namespace there. */}}
+{{- if and .Values.keycloak.readerSecret (lookup "v1" "Namespace" "" .Release.Namespace) }}
+{{- if not (lookup "v1" "Secret" .Release.Namespace .Values.keycloak.readerSecret) }}
+{{- fail (printf "Secret %s/%s (keycloak.readerSecret) is missing: create it with client_id and client_secret, or set keycloak.readerSecret to \"\"" .Release.Namespace .Values.keycloak.readerSecret) }}
+{{- end }}
+{{- end }}

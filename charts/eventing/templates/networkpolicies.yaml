@@ -1,0 +1,72 @@
+{{- $prefix := printf "%s-%s" .Release.Namespace .Release.Name }}
+{{- /* Kept on uninstall: the Broker and its Triggers outlive the chart and must not be left open. See the README for the removal order. */}}
+# Knative's broker ingress accepts any event that reaches it. Only our ingress
+# may reach it. That also blocks replies: if a sink answers with a CloudEvent,
+# Knative's broker filter sends it back to the broker ingress, past our ingress,
+# and it would reach every subscriber. The filter retries a blocked reply for a
+# while and drops it. The broker ingress is shared by every Broker in the
+# cluster, so Knative must be used by eventing only.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $prefix }}-broker-ingress
+  namespace: {{ .Values.knative.namespace }}
+  labels:
+    {{- include "eventing.labels" (dict "ctx" . "component" "ingress") | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  podSelector:
+    matchLabels:
+      eventing.knative.dev/brokerRole: ingress
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: {{ .Release.Namespace }}}
+          podSelector:
+            matchLabels:
+              {{- include "eventing.selectorLabels" (dict "ctx" . "component" "ingress") | nindent 14 }}
+---
+# The broker's channel accepts events, too, and hands them to every Trigger.
+# Only Knative's broker ingress may reach it, so nothing gets past our ingress
+# that way.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $prefix }}-channel
+  namespace: {{ .Values.knative.namespace }}
+  labels:
+    {{- include "eventing.labels" (dict "ctx" . "component" "ingress") | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  podSelector:
+    matchLabels:
+      messaging.knative.dev/role: dispatcher
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {eventing.knative.dev/brokerRole: ingress}
+---
+# The broker filter delivers what it gets to a Trigger's sink. Only the
+# channel's dispatcher may reach it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $prefix }}-broker-filter
+  namespace: {{ .Values.knative.namespace }}
+  labels:
+    {{- include "eventing.labels" (dict "ctx" . "component" "ingress") | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  podSelector:
+    matchLabels:
+      eventing.knative.dev/brokerRole: filter
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {messaging.knative.dev/role: dispatcher}

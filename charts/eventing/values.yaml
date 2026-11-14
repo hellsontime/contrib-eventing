@@ -1,0 +1,60 @@
+image:
+  repository: ghcr.io/platform-mesh/contrib-eventing
+  # Defaults to the chart's appVersion.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+# The provider kubeconfig the platform-mesh-operator copies next to the
+# ManagedProvider (<name>-provider-kubeconfig). Admin in eventing's own kcp
+# workspace only. The init container puts the eventing API there, the
+# controller watches Subscriptions with it.
+kcp:
+  kubeconfigSecret: eventing-provider-kubeconfig
+  kubeconfigKey: kubeconfig
+  apiExportEndpointSlice: eventing.platform-mesh.io
+
+# The extraProviderConnections Secret for core.platform-mesh.io in
+# root:platform-mesh-system. The OpenFGA adapter reads account paths with it.
+# Empty: events have no accountPath.
+core:
+  kubeconfigSecret: contrib-eventing-core
+
+# readerSecret: a client of the master realm with only view-events and
+# view-users, as a Secret with client_id and client_secret, usually
+# contrib-eventing-keycloak-reader. Empty: no login events and no names in
+# member snapshots.
+keycloak:
+  url: http://keycloak-service.platform-mesh-system.svc.cluster.local:8080/keycloak
+  readerSecret: ""
+
+openfga:
+  url: http://openfga.platform-mesh-system.svc.cluster.local:8080
+
+# The claim Platform Mesh uses as user id (security-operator --user-claim):
+# email or sub.
+userClaim: email
+
+# Hosts sinks and dead letter sinks may point at, exact or *.suffix. Empty
+# allows none.
+allowedSinkHosts: []
+
+# Exposes the ingress through the platform's Gateway as
+# eventing.services.<baseDomain>.
+httpRoute:
+  enabled: true
+  baseDomain: ""
+  parentRef:
+    name: k8sapi-gateway
+    namespace: platform-mesh-system
+    sectionName: terminate-services
+
+knative:
+  namespace: knative-eventing
+  brokerIngress: http://broker-ingress.knative-eventing.svc.cluster.local
+
+# kcp hands out virtual workspace URLs with the public host names. Where they
+# don't resolve inside the cluster (kind with *.localhost), point them at the
+# Gateway here, like the Platform Mesh kind profile does.
+hostAliases: []
+
+resources: {}

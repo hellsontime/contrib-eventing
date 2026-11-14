@@ -1,0 +1,51 @@
+{{- if .Values.keycloak.readerSecret }}
+{{- $c := dict "ctx" . "component" "keycloak-adapter" }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "eventing.name" $c }}
+  labels:
+    {{- include "eventing.labels" $c | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "eventing.selectorLabels" $c | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "eventing.selectorLabels" $c | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "eventing.name" $c }}
+      {{- include "eventing.podSpec" . | nindent 6 }}
+      containers:
+        - name: adapter
+          image: {{ include "eventing.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - keycloak-adapter
+            - --user-claim={{ .Values.userClaim }}
+            - --keycloak-url={{ .Values.keycloak.url }}
+            - --ingress-url={{ include "eventing.ingressURL" . }}
+          env:
+            - name: POD_NAMESPACE
+              valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
+          volumeMounts:
+            - {name: token, mountPath: /var/run/secrets/contrib-eventing, readOnly: true}
+            - {name: keycloak, mountPath: /var/run/secrets/keycloak, readOnly: true}
+          securityContext:
+            {{- include "eventing.containerSecurityContext" . | nindent 12 }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        # A token only the ingress accepts.
+        - name: token
+          projected:
+            sources:
+              - serviceAccountToken: {path: token, audience: contrib-eventing, expirationSeconds: 3600}
+        # The reader client: view-events and view-users only.
+        - name: keycloak
+          secret: {secretName: {{ .Values.keycloak.readerSecret }}}
+{{- end }}
