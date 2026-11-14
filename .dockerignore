@@ -7,3 +7,4 @@
 !api/
 !internal/
 !main.go
+!config/kcp/provider/
