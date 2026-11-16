@@ -28,6 +28,12 @@ h upgrade platform-mesh-prerequisites "$CHARTS/platform-mesh-prerequisites" \
 
 gateway_cluster_ip=$(k -n platform-mesh-system get svc platform-mesh-prerequisites-traefik -o jsonpath='{.spec.clusterIP}')
 test -n "$gateway_cluster_ip"
+# Workaround for a platform bug: the kind profile gives every platform pod host
+# aliases to Traefik except the operator's own, so its Provider controller can't
+# reach kcp and no ManagedProvider gets Ready.
+operator_host_aliases=$(jq -cn --arg ip "$gateway_cluster_ip" --arg d "$BASE_DOMAIN" \
+  '[{ip: $ip, hostnames: [$d, "kcp.api." + $d, "root.kcp." + $d]}]')
+# Chart 0.61.0 knows only gateway.traefikClusterIP, 0.62.0 also gateway.clusterIP.
 h upgrade --install platform-mesh-operator "$CHARTS/platform-mesh-operator" \
   --version "$OPERATOR_VERSION" --namespace platform-mesh-system \
   --set ocm.enabled=true \
@@ -35,7 +41,9 @@ h upgrade --install platform-mesh-operator "$CHARTS/platform-mesh-operator" \
   --set gateway.className=traefik \
   --set gateway.baseDomain="$BASE_DOMAIN" \
   --set gateway.port=8443 \
-  --set gateway.clusterIP="$gateway_cluster_ip" \
+  --set gateway.traefikClusterIP="$gateway_cluster_ip" \
+  --set hostAliases.enabled=true \
+  --set-json hostAliases.entries="$operator_host_aliases" \
   --set kcp.frontProxyPort=8443 \
   --set certificates.selfSigned.enabled=true \
   --set-string ocm.version="$PLATFORM_MESH_VERSION" \
