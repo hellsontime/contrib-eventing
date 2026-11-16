@@ -87,7 +87,8 @@ jobs:
       - uses: ludeeus/action-shellcheck@00cae500b08a931fb5698e11e79bfbd38e612a38 # 2.0.0
 
   # A released Platform Mesh on kind, as in its installation guide, and
-  # eventing through the ManagedProvider from a local registry.
+  # eventing through the ManagedProvider from an OCM component in a local
+  # registry.
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 120
@@ -113,6 +114,7 @@ jobs:
           kubectl get pods -A -o wide >state/pods.txt 2>&1 || true
           kubectl get events -A --sort-by=.lastTimestamp >state/events.txt 2>&1 || true
           kubectl -n platform-mesh-system get platformmesh,managedprovider,helmrelease,ocirepository -o yaml >state/platform-mesh.yaml 2>&1 || true
+          kubectl -n platform-mesh-system get repositories.delivery.ocm.software,components.delivery.ocm.software,resources.delivery.ocm.software -o yaml >state/ocm.yaml 2>&1 || true
           for d in $(kubectl -n platform-mesh-system get deploy -l app.kubernetes.io/name=eventing -o name 2>/dev/null); do
             kubectl -n platform-mesh-system logs "$d" --all-containers >"state/${d#*/}.log" 2>&1 || true
           done

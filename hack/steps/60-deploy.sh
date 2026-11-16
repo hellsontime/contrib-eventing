@@ -1,7 +1,8 @@
-# Installs eventing the way a platform operator would: the chart in a registry
-# and a ManagedProvider that points at it. The platform-mesh-operator creates
-# the provider workspace, puts its kubeconfig next to the ManagedProvider and
-# installs the chart with Flux.
+# Installs eventing the way a platform operator would: the OCM component in a
+# registry and a ManagedProvider that points at it. The platform-mesh-operator
+# creates the provider workspace, puts its kubeconfig next to the
+# ManagedProvider, resolves the chart with the ocm-controller and installs it
+# with Flux.
 
 # Sinks may only point at these hosts: the demo sinks, comma separated, exact
 # or *.suffix.
@@ -15,21 +16,43 @@ USER_CLAIM=$(kind_kubectl -n platform-mesh-system get deploy security-operator -
   jq -r '[.spec.template.spec.containers[] | select(.name == "security-operator") | (.args // [])[] |
     select(startswith("--user-claim=")) | ltrimstr("--user-claim=")] | first // "email"')
 
-# The chart version is a hash of the chart, so a chart change is a new version
-# for Flux.
-chart_hash=$(cd "$ROOT/charts/eventing" && find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-12)
-CHART_VERSION=0.0.0-dev-$chart_hash
-# helm package gives a new digest each time, which Flux would roll out, so an
+# The ocm CLI, for hack/ocm-component.sh. Checked against config/ocm/sha256sums.
+OCM_CLI_VERSION=0.54.0
+ocm_dir=$SECRET_DIR/ocm-$OCM_CLI_VERSION
+if [[ ! -x $ocm_dir/ocm ]]; then
+  os=$(uname -s | tr '[:upper:]' '[:lower:]')
+  arch=$(uname -m) && arch=${arch/x86_64/amd64} && arch=${arch/aarch64/arm64}
+  tarball=ocm-$OCM_CLI_VERSION-$os-$arch.tar.gz
+  mkdir -p "$ocm_dir"
+  curl -sSfL -o "$ocm_dir/$tarball" "https://github.com/open-component-model/ocm/releases/download/v$OCM_CLI_VERSION/$tarball"
+  (cd "$ocm_dir" && grep " $tarball\$" "$ROOT/config/ocm/sha256sums" | sha256sum --quiet -c -) ||
+    die "ocm CLI checksum mismatch or no checksum for $tarball"
+  tar -xzf "$ocm_dir/$tarball" -C "$ocm_dir" ocm
+fi
+
+# The operator refuses to downgrade a component, so new content gets a newer
+# version, and content that is deployed already keeps its version.
+COMPONENT=github.com/platform-mesh/contrib-eventing
+# The image hack/steps/50-image.sh pushed, as the cluster sees it.
+IMAGE_PUSHED=$REGISTRY:5000/${IMAGE_TAGGED##*/}@$IMAGE_DIGEST
+content_hash=$({
+  cd "$ROOT" && find charts/eventing ocm hack/ocm-component.sh -type f -print0 | sort -z | xargs -0 sha256sum
+  echo "$IMAGE_PUSHED"
+} | sha256sum | cut -c1-12)
+COMPONENT_VERSION=$(kind_kubectl -n "$NS" get managedprovider "$PROVIDER" --ignore-not-found -o json |
+  jq -r '.spec.runtimeDeployments[0].ocm.version // empty')
+[[ $COMPONENT_VERSION == *".h$content_hash" ]] || COMPONENT_VERSION=0.0.0-dev.$(date +%s).h$content_hash
+# Each build packs the chart anew, a new digest Flux would roll out, so an
 # existing version is left alone.
 if curl -sf -o /dev/null -H 'Accept: application/vnd.oci.image.manifest.v1+json' \
-  "http://localhost:$REGISTRY_PORT/v2/charts/eventing/manifests/$CHART_VERSION"; then
-  log "Chart eventing $CHART_VERSION is already in $REGISTRY"
+  "http://localhost:$REGISTRY_PORT/v2/ocm/component-descriptors/$COMPONENT/manifests/$COMPONENT_VERSION"; then
+  log "Component $COMPONENT_VERSION is already in $REGISTRY"
 else
-  log "Pushing chart eventing $CHART_VERSION to $REGISTRY"
+  log "Pushing component $COMPONENT_VERSION to $REGISTRY"
   tmp=$(mktemp -d)
-  helm package "$ROOT/charts/eventing" --version "$CHART_VERSION" --app-version "${IMAGE_TAGGED##*:}" -d "$tmp" >/dev/null
-  helm push "$tmp/eventing-$CHART_VERSION.tgz" "oci://localhost:$REGISTRY_PORT/charts" --plain-http >/dev/null 2>&1 ||
-    die "helm push to localhost:$REGISTRY_PORT failed"
+  PATH=$ocm_dir:$PATH "$ROOT/hack/ocm-component.sh" "$COMPONENT_VERSION" "$IMAGE_PUSHED" "$tmp/ctf" >/dev/null
+  "$ocm_dir/ocm" transfer ctf --overwrite "$tmp/ctf" "http://localhost:$REGISTRY_PORT/ocm" >/dev/null ||
+    die "ocm transfer to localhost:$REGISTRY_PORT failed"
   rm -r "$tmp"
 fi
 
@@ -44,10 +67,10 @@ if [[ -n $traefik ]] && jq -e --argjson p "$PORT" 'any(.spec.ports[]; .port == $
   host_aliases=$(jq -c --arg d "$BASE_DOMAIN" '[{ip: .spec.clusterIP, hostnames: [$d, "kcp.api." + $d, "root.kcp." + $d]}]' <<<"$traefik")
 fi
 
-log "Applying ManagedProvider $PROVIDER (image $IMAGE_TAGGED, user claim $USER_CLAIM)"
-jq -n --arg ns "$NS" --arg name "$PROVIDER" --arg version "$CHART_VERSION" --arg registry "$REGISTRY:5000/charts" \
-  --arg image "$IMAGE_TAGGED" --arg domain "$BASE_DOMAIN" --arg sinks "$ALLOWED_SINK_HOSTS" \
-  --arg claim "$USER_CLAIM" --argjson aliases "$host_aliases" '{
+log "Applying ManagedProvider $PROVIDER (component $COMPONENT_VERSION, user claim $USER_CLAIM)"
+jq -n --arg ns "$NS" --arg name "$PROVIDER" --arg version "$COMPONENT_VERSION" --arg component "$COMPONENT" \
+  --arg registry "http://$REGISTRY:5000/ocm" --arg image "$IMAGE_TAGGED" --arg domain "$BASE_DOMAIN" \
+  --arg sinks "$ALLOWED_SINK_HOSTS" --arg claim "$USER_CLAIM" --argjson aliases "$host_aliases" '{
   apiVersion: "providers.platform-mesh.io/v1alpha1",
   kind: "ManagedProvider",
   metadata: {name: $name, namespace: $ns},
@@ -55,9 +78,11 @@ jq -n --arg ns "$NS" --arg name "$PROVIDER" --arg version "$CHART_VERSION" --arg
     platformMeshRef: {name: "platform-mesh"},
     # uninstall.sh leaves nothing behind, so the workspace goes too.
     cleanupOnDelete: true,
-    runtimeDeployments: [{flux: {
-      registry: $registry, chart: "eventing", version: $version, insecure: true,
+    # The operator keeps the http:// of a plain-http registry.
+    runtimeDeployments: [{ocm: {
+      name: $name, registry: $registry, component: $component, version: $version, insecure: true,
       values: {
+        # The kind node pulls nothing from the registry, so the loaded image.
         image: {repository: ($image | sub(":[^:]*$"; "")), tag: ($image | sub("^.*:"; "")), pullPolicy: "IfNotPresent"},
         httpRoute: {baseDomain: $domain},
         allowedSinkHosts: ($sinks | split(",")),
@@ -72,11 +97,11 @@ jq -n --arg ns "$NS" --arg name "$PROVIDER" --arg version "$CHART_VERSION" --arg
 
 # Flux has tried this chart version and is done with it.
 release_settled() {
-  kind_kubectl -n "$NS" get helmrelease "$PROVIDER" -o json | jq -e --arg v "$CHART_VERSION" '
+  kind_kubectl -n "$NS" get helmrelease "$PROVIDER" -o json | jq -e --arg v "$COMPONENT_VERSION" '
     (.status.lastAttemptedRevision // "" | startswith($v + "+")) and
     any(.status.conditions[]?; .type == "Ready" and .status != "Unknown")'
 }
-wait_for "Flux to install chart $CHART_VERSION" 300 release_settled
+wait_for "Flux to install chart $COMPONENT_VERSION" 300 release_settled
 ready=$(kind_kubectl -n "$NS" get helmrelease "$PROVIDER" -o json | jq -r '.status.conditions[] | select(.type == "Ready")')
 [[ $(jq -r .status <<<"$ready") == True ]] || die "HelmRelease $NS/$PROVIDER failed: $(jq -r .message <<<"$ready")"
 kind_kubectl -n "$NS" wait --for=condition=Ready "managedprovider/$PROVIDER" --timeout=120s >/dev/null

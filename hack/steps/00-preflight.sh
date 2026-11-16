@@ -7,8 +7,10 @@ done
 kind_kubectl -n platform-mesh-system wait --for=condition=Ready platformmesh/platform-mesh --timeout=10s >/dev/null ||
   die "PlatformMesh is not Ready in context $KUBE_CONTEXT"
 
-# The platform-mesh-operator installs ManagedProviders with Flux.
-for crd in ocirepositories.source.toolkit.fluxcd.io helmreleases.helm.toolkit.fluxcd.io managedproviders.providers.platform-mesh.io; do
+# The platform-mesh-operator installs ManagedProviders with Flux and the
+# ocm-controller.
+for crd in ocirepositories.source.toolkit.fluxcd.io helmreleases.helm.toolkit.fluxcd.io managedproviders.providers.platform-mesh.io \
+  components.delivery.ocm.software resources.delivery.ocm.software; do
   kind_kubectl get crd "$crd" >/dev/null 2>&1 || die "CRD $crd is missing, Platform Mesh is installed without it"
 done
 

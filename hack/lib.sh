@@ -19,7 +19,7 @@ DEMO_USER=${DEMO_USER:-$ORG@example.com}
 KNATIVE_VERSION=${KNATIVE_VERSION:-v1.23.1}
 NATSS_VERSION=${NATSS_VERSION:-v1.23.3}
 IMAGE=${IMAGE:-ghcr.io/platform-mesh/contrib-eventing:dev}
-# A registry container on the kind network that Flux pulls the chart from.
+# A registry container on the kind network for the OCM component and the image.
 REGISTRY=${REGISTRY:-kind-registry}
 REGISTRY_PORT=${REGISTRY_PORT:-5001}
 # Eventing runs next to the platform, as ManagedProvider "eventing".

@@ -82,12 +82,12 @@ prerequisites chart brings Flux and the ocm-controller.
    to install if that Secret is missing. Without it there are no login events
    and no names.
 4. **The ManagedProvider.** Apply
-   [`config/install/managedprovider.yaml`](config/install/managedprovider.yaml)
-   (from the OCM component) or
+   [`config/install/managedprovider.yaml`](config/install/managedprovider.yaml),
+   which installs the OCM component, with your base domain, the hosts sinks
+   may point at and the user claim. All values are in
+   [`charts/eventing/values.yaml`](charts/eventing/values.yaml). Without OCM,
    [`managedprovider-flux.yaml`](config/install/managedprovider-flux.yaml)
-   (the chart only) with your base domain, the hosts sinks may point at and
-   the user claim. All values are in
-   [`charts/eventing/values.yaml`](charts/eventing/values.yaml).
+   installs the chart straight from its OCI registry.
 
 Subscriptions go into eventing's workspace, which a platform admin finds in
 `root:providers`:
@@ -128,9 +128,11 @@ would get them. To remove eventing completely, in this order:
 You need a local Platform Mesh on kind, installed as described in
 [helm-charts/installation](https://github.com/platform-mesh/helm-charts/tree/main/installation),
 and `kubectl`, `helm`, `docker`, `curl` and `jq`. The install adds Knative
-Eventing and a single NATS JetStream server, builds the image into kind, puts
-the chart into a registry container `kind-registry` and applies the
-`ManagedProvider`.
+Eventing and a single NATS JetStream server, builds the image into kind, builds
+the OCM component with `hack/ocm-component.sh` into a registry container
+`kind-registry` and applies the `ManagedProvider` with `ocm:`. The kind node
+can't pull from that registry, so the `ManagedProvider` sets the `image` values
+to the image loaded into kind.
 
 ```sh
 ./hack/install.sh     # adds eventing, a subscribed sink and a demo org eventing-demo
@@ -160,14 +162,6 @@ A `v<version>` tag publishes the image `ghcr.io/platform-mesh/contrib-eventing`,
 the chart `oci://ghcr.io/platform-mesh/contrib-eventing/charts/eventing` and
 the OCM component `github.com/platform-mesh/contrib-eventing` in
 `ghcr.io/platform-mesh`, all with the version without the `v`.
-
-To try the OCM path on kind, build the component with
-`hack/ocm-component.sh <version> <image> ctf`, push it with
-`ocm transfer ctf --overwrite ctf http://kind-registry:5000/ocm` (the image has
-to be in a registry too, the component pins its digest) and set
-`registry: http://kind-registry:5000/ocm` and `insecure: true` in the
-`ManagedProvider`. The chart uses the component's image; unless the kind node
-can pull from that registry, keep the `image` values `hack/install.sh` sets.
 
 ## Background
 

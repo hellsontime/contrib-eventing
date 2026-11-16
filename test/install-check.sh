@@ -86,8 +86,9 @@ if $uninstall; then
   done
   left=$(kind_kubectl -n "$NS" get deploy,replicaset,pod,service,configmap,secret,serviceaccount,role,rolebinding,httproute -l app.kubernetes.io/name=eventing -o name)
   [[ -z $left ]] && pass "no chart objects in $NS" || fail "left in $NS: ${left//$'\n'/ }"
-  left=$(kind_kubectl -n "$NS" get managedprovider,helmrelease,ocirepository "$PROVIDER" -o name --ignore-not-found 2>/dev/null)
-  [[ -z $left ]] && pass "ManagedProvider, HelmRelease and OCIRepository gone" || fail "left: ${left//$'\n'/ }"
+  left=$(kind_kubectl -n "$NS" get managedprovider,helmrelease,ocirepository,repositories.delivery.ocm.software,components.delivery.ocm.software,resources.delivery.ocm.software \
+    "$PROVIDER" -o name --ignore-not-found 2>/dev/null)
+  [[ -z $left ]] && pass "ManagedProvider, Flux and OCM objects gone" || fail "left: ${left//$'\n'/ }"
   for cm in "${own_configmaps[@]}"; do
     kind_kubectl -n "$NS" get configmap "$cm" >/dev/null 2>&1 && fail "ConfigMap $cm still there" || pass "ConfigMap $cm gone"
   done
