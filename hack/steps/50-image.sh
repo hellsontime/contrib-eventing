@@ -10,8 +10,10 @@ image_name=${IMAGE_TAGGED##*/} && image_name=${image_name%:*}
 
 # registry_digest <repository> <tag>: the digest of the tag in the registry, if it is there.
 registry_digest() {
-  curl -sfI -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json' \
-    "http://localhost:$REGISTRY_PORT/v2/$1/manifests/$2" | tr -d '\r' | awk 'tolower($1) == "docker-content-digest:" {print $2}'
+  local headers
+  headers=$(curl -sfI -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json' \
+    "http://localhost:$REGISTRY_PORT/v2/$1/manifests/$2") || return 0
+  tr -d '\r' <<<"$headers" | awk 'tolower($1) == "docker-content-digest:" {print $2}'
 }
 
 build() {

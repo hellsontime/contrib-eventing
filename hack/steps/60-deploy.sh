@@ -18,6 +18,7 @@ USER_CLAIM=$(kind_kubectl -n platform-mesh-system get deploy security-operator -
 
 # The ocm CLI, for hack/ocm-component.sh. Checked against config/ocm/sha256sums.
 OCM_CLI_VERSION=0.54.0
+OCM_CLI_IMAGE=ghcr.io/open-component-model/ocm/ocm.software/ocmcli/ocmcli-image:$OCM_CLI_VERSION@sha256:3551db7c268815e61c35ef37a37c078b35052a11011cae23fe5d2de203b7302c
 ocm_dir=$SECRET_DIR/ocm-$OCM_CLI_VERSION
 if [[ ! -x $ocm_dir/ocm ]]; then
   os=$(uname -s | tr '[:upper:]' '[:lower:]')
@@ -51,8 +52,12 @@ else
   log "Pushing component $COMPONENT_VERSION to $REGISTRY"
   tmp=$(mktemp -d)
   PATH=$ocm_dir:$PATH "$ROOT/hack/ocm-component.sh" "$COMPONENT_VERSION" "$IMAGE_PUSHED" "$tmp/ctf" >/dev/null
-  "$ocm_dir/ocm" transfer ctf --overwrite "$tmp/ctf" "http://localhost:$REGISTRY_PORT/ocm" >/dev/null ||
-    die "ocm transfer to localhost:$REGISTRY_PORT failed"
+  # From the kind network: the chart's global access names the registry the
+  # way the ocm-controller reaches it.
+  chmod -R a+rX "$tmp"
+  docker run --rm --network kind -v "$tmp/ctf:/ctf:ro" "$OCM_CLI_IMAGE" \
+    transfer ctf --overwrite /ctf "http://$REGISTRY:5000/ocm" >/dev/null ||
+    die "ocm transfer to $REGISTRY:5000 failed"
   rm -r "$tmp"
 fi
 
