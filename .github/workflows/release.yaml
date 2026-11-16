@@ -15,6 +15,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -31,7 +33,8 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository_owner }}/contrib-eventing
           tags: type=semver,pattern={{version}}
-      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+      - id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -65,7 +68,7 @@ jobs:
 
   ocm:
     runs-on: ubuntu-latest
-    # The component references the pushed image by digest.
+    # The component pins the image the image job pushed by its digest.
     needs: image
     permissions:
       contents: read
@@ -86,6 +89,7 @@ jobs:
       - name: Push the component
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE_DIGEST: ${{ needs.image.outputs.digest }}
         run: |
           version=${GITHUB_REF_NAME#v}
           owner=${GITHUB_REPOSITORY_OWNER,,}
@@ -99,5 +103,5 @@ jobs:
                     - type: Credentials
                       properties: {username: $GITHUB_ACTOR, password: $GITHUB_TOKEN}
           YAML
-          hack/ocm-component.sh "$version" "ghcr.io/$owner/contrib-eventing:$version" ctf
+          hack/ocm-component.sh "$version" "ghcr.io/$owner/contrib-eventing:$version@$IMAGE_DIGEST" ctf
           ocm transfer ctf --overwrite ctf "ghcr.io/$owner"
