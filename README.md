@@ -49,6 +49,10 @@ creates eventing's workspace in kcp, `root:providers:eventing-<id>`, and
 installs the chart with Flux into `platform-mesh-system`. Platform Mesh's
 prerequisites chart brings Flux and the ocm-controller.
 
+Coming from the old install (namespace `contrib-eventing`, workspace
+`root:providers:eventing`, `contrib-eventing-*` NetworkPolicies)? Run its
+`hack/uninstall.sh` first. The adapters' state is not carried over.
+
 1. **Knative Eventing and NATS JetStream.** Knative in that cluster must be
    used by eventing only (see
    [architecture](docs/architecture.md#how-it-plugs-in)), and the CNI must

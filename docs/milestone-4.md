@@ -3,6 +3,10 @@
 Goal: someone outside the team installs eventing on their own Platform Mesh
 from a release and tries it, and providers can publish their own events.
 
+This is the last milestone of the eventing epic. Tenant-scoped subscriptions
+are not part of the epic: milestone 2 decided on subscriptions for platform
+admins, filtered by org.
+
 Two parts with their own issues: the installable module
 ([#13](https://github.com/platform-mesh/contrib-eventing/issues/13)) and
 provider publishing
@@ -129,6 +133,8 @@ providers. Details in the ADR.
    `ManagedProvider` install.
 4. Least privilege once platform-mesh#577 and #578 are released.
 5. `hack/install.sh` on the chart, e2e in CI on the `ManagedProvider` path.
+6. Before the first release, one manual run on a kcp with two shards. CI has
+   one shard, and the adapter's `AccountInfo` watch should follow every shard.
 
-Not in this milestone: more than one kcp shard (later), providers receiving
+Not in this milestone: more than one kcp shard in CI, providers receiving
 events, org and account level subscriptions.
