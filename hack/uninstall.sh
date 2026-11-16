@@ -16,9 +16,15 @@ done
 source "$ROOT/hack/steps/00-preflight.sh"
 
 if kind_kubectl -n "$NS" get secret "$PROVIDER-provider-kubeconfig" >/dev/null 2>&1; then
-  log "Removing Subscriptions"
-  # The controller is still running and removes the Triggers on the way.
-  kcp "$(eventing_workspace)" delete subscriptions --all --timeout=60s >/dev/null
+  ws=$(eventing_workspace)
+  # A half finished install may never have bound the API.
+  if [[ $(kcp "$ws" get apibinding eventing.platform-mesh.io --ignore-not-found -o jsonpath='{.status.phase}') == Bound ]]; then
+    log "Removing Subscriptions"
+    # The controller is still running and removes the Triggers on the way.
+    kcp "$ws" delete subscriptions --all --timeout=60s >/dev/null
+  else
+    log "The eventing API is not bound in $ws, no Subscriptions to remove"
+  fi
 fi
 
 # Undo exactly what hack/steps/45-keycloak-reader.sh changed (a stopgap until
