@@ -4,6 +4,12 @@
 {{- fail (printf "%s is not in the cluster: eventing needs Knative Eventing with the NATS JetStream channel installed first" .) }}
 {{- end }}
 {{- end }}
+{{- /* The NetworkPolicies lock down the broker ingress every Broker shares, so other Brokers would stop getting events. Not checked by helm template. */}}
+{{- range (lookup "eventing.knative.dev/v1" "Broker" "" "").items | default list }}
+{{- if ne .metadata.namespace $.Release.Namespace }}
+{{- fail (printf "Knative in this cluster has the Broker %s/%s of someone else: eventing needs Knative for itself" .metadata.namespace .metadata.name) }}
+{{- end }}
+{{- end }}
 {{- /* Without it the Broker gets Knative's in-memory channel, which loses events on restarts. Not checked by helm template. */}}
 {{- with lookup "v1" "ConfigMap" .Values.knative.namespace "config-br-default-channel" }}
 {{- if not (contains "NatsJetStreamChannel" (index (.data | default dict) "channel-template-spec" | default "")) }}
