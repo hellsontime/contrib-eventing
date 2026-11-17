@@ -5,6 +5,10 @@
 # shortcut: instead of logging in as the new user, the kcp admin creates the
 # Account while impersonating them. The Account webhook then records the user
 # as creator, and Platform Mesh invites them into the organization's realm.
+#
+# It runs before 45-keycloak-reader.sh, which gives the reader its roles only
+# on the realms that exist by then. On a fresh Platform Mesh the demo realm is
+# the only one.
 
 log "Creating demo organization $ORG for $DEMO_USER"
 kcp root:orgs apply --as "$DEMO_USER" -f - >/dev/null <<EOF

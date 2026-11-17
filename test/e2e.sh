@@ -61,7 +61,7 @@ grep -q "\"id\": \"$DEMO_USER\"" <<<"$event" && pass "user.id by the configured 
   fail "snapshot: $(roles "$account_id" "$DEMO_USER")"
 path=$(last_snapshot "$account_id" | jq -r .accountPath)
 [[ $path == "root:orgs:$ORG" ]] && pass "snapshot accountPath" || fail "snapshot accountPath: $path"
-# hack/steps/70-demo-org.sh gave the demo user a name in Keycloak.
+# hack/steps/40-demo-org.sh gave the demo user a name in Keycloak.
 names=$(last_snapshot "$account_id" | jq -r --arg u "$DEMO_USER" '.members[] | select(.user.id == $u) | "\(.user.firstName) \(.user.lastName)"')
 [[ $names == "Eventing Demo" ]] && pass "snapshot has the member's names" || fail "snapshot names: $names"
 
