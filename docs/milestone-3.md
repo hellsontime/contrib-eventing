@@ -92,8 +92,8 @@ security-operator, so its owners have to agree.
      subscribers have to cope with events without an org.
 
    **Proposal: a)**, `master` is skipped as well.
-4. **User created and deleted.** The first consumer's fork sends after
-   membership changes and logins, not when users are created or deleted.
+4. **User created and deleted.** The first consumer's fork also sends them,
+   from its own user table (see [milestone 5](milestone-5.md)).
    - a) Logins only in this milestone.
    - b) All three.
 

@@ -22,9 +22,13 @@ Each milestone ends with something that runs on a local kind setup.
    OCM component, install through `ManagedProvider` on any Platform Mesh, CI.
    Providers publish their own events through the ingress. Details:
    [milestone 4](milestone-4.md).
-5. **Later.** User created and deleted from the `User` CRD of ADR 018, for any
-   IdP. Org- and account-level subscriptions, kcp resource events, more than
-   one kcp shard.
+5. **Everything the first consumer's fork sends.** Email and names in logins
+   and member lists, member lists on first login, continuous programs as
+   accounts, and the contract for user created and deleted. Details:
+   [milestone 5](milestone-5.md).
+6. **Later.** Sending user created and deleted from the `User` CRD of ADR 018,
+   for any IdP. Org- and account-level subscriptions, kcp resource events,
+   more than one kcp shard.
 
 Delivery stays HTTP to the subscriber in all of these. Bridges to GCP Pub/Sub,
 Kafka and the like run on the subscriber side.
