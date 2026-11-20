@@ -119,7 +119,8 @@ security-operator, so its owners have to agree.
    **Decided: c)**: provider publishing and the installable module both go
    into milestone 4, as two parts with their own issues that can run in
    parallel. Provider publishing starts with its own ADR. See
-   [milestone 4](milestone-4.md).
+   [milestone 4](milestone-4.md). Provider publishing later became its own
+   milestone 6, see the [roadmap](roadmap.md).
 
 ## Order
 
