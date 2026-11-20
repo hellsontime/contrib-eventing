@@ -1,4 +1,4 @@
-# Applied into root:providers:eventing, which also binds it. There is no
+# kcp-setup applies it into eventing's provider workspace and binds it there. There is no
 # APIExportPolicy, so org workspaces cannot bind it: Subscriptions are for
 # platform admins.
 apiVersion: apis.kcp.io/v1alpha2

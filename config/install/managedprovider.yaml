@@ -1,0 +1,40 @@
+# Installs eventing from its OCM component. The platform-mesh-operator creates
+# the provider workspace root:providers:eventing-<id>, copies its kubeconfig
+# into Secret eventing-provider-kubeconfig and installs the chart with Flux.
+# Needs Knative Eventing with the NATS JetStream channel and the
+# core.platform-mesh.io connection (core-connection.yaml) first, see README.md.
+apiVersion: providers.platform-mesh.io/v1alpha1
+kind: ManagedProvider
+metadata:
+  # The chart's defaults expect the name eventing.
+  name: eventing
+  namespace: platform-mesh-system
+spec:
+  platformMeshRef:
+    name: platform-mesh
+  # Deleting the ManagedProvider keeps the workspace and its Subscriptions,
+  # unless this is true.
+  cleanupOnDelete: false
+  runtimeDeployments:
+    - ocm:
+        # Names the HelmRelease and the other generated objects.
+        name: eventing
+        registry: ghcr.io/platform-mesh
+        component: github.com/platform-mesh/contrib-eventing
+        version: 0.1.0
+        values:
+          httpRoute:
+            # Required: the PlatformMesh's spec.exposure.baseDomain.
+            baseDomain: ""
+          # Hosts Subscriptions may deliver to, exact or *.suffix.
+          allowedSinkHosts: []
+          # security-operator's --user-claim.
+          userClaim: email
+          # For login events and names, see README.md.
+          # keycloak:
+          #   readerSecret: contrib-eventing-keycloak-reader
+          # Only where the public kcp host names don't resolve in the cluster,
+          # like *.localhost on kind: point them at the Gateway's ClusterIP.
+          # hostAliases:
+          #   - ip: <Gateway ClusterIP>
+          #     hostnames: [<baseDomain>, kcp.api.<baseDomain>, root.kcp.<baseDomain>]

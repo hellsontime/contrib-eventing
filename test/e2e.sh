@@ -9,7 +9,9 @@ pass() { printf '  ok    %s\n' "$*"; }
 fail() { printf '  FAIL  %s\n' "$*"; failed=1; }
 
 sub=memberships-to-event-display
-admin() { kcp root:providers:eventing "$@"; }
+EVENTING_WS=$(eventing_workspace)
+admin() { kcp "$EVENTING_WS" "$@"; }
+INGRESS_URL=http://eventing-ingress.$NS.svc.cluster.local
 sink_logs() { kind_kubectl -n eventing-demo-sink logs deploy/event-display; }
 count() { sink_logs | grep -c "type: io.platform-mesh.iam.membership.$1" || true; }
 more_than() { (($(count "$1") > $2)); }
@@ -34,8 +36,14 @@ more_logins_than() { (($(logins) > $1)); }
 last_login() { sink_logs | grep -A23 "type: io.platform-mesh.iam.user.loggedin" | tail -24; }
 subscription_ready() { [[ $(admin get subscription $sub -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}') == True ]]; }
 
+log "The ManagedProvider installed eventing"
+[[ $(kind_kubectl -n "$NS" get managedprovider "$PROVIDER" -o jsonpath='{.status.phase}') == Ready ]] &&
+  pass "ManagedProvider $PROVIDER Ready" || fail "ManagedProvider $PROVIDER not Ready"
+[[ $(admin get apibinding eventing.platform-mesh.io -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}') == True ]] &&
+  pass "kcp-setup bound the eventing API in $EVENTING_WS" || fail "APIBinding not Ready in $EVENTING_WS"
+
 log "The platform admin's Subscription is ready"
-subscription_ready && pass "Ready in root:providers:eventing" || fail "Subscription not ready"
+subscription_ready && pass "Ready in $EVENTING_WS" || fail "Subscription not ready"
 
 log "A new member is announced"
 # The org account lives in root:orgs, so its id starts with that cluster.
@@ -97,8 +105,8 @@ grep -q "\"id\": \"$DEMO_USER\"" <<<"$event" && pass "user.id by the configured 
 grep -q "\"org\": \"$ORG\"" <<<"$event" && pass "org in the data" || fail "login org missing"
 grep -qi 'ipaddress\|sessionid' <<<"$event" && fail "login has an IP address or session id" || pass "no IP address or session id"
 total=$(logins)
-kind_kubectl -n "$NS" rollout restart deploy/keycloak-adapter >/dev/null
-kind_kubectl -n "$NS" rollout status deploy/keycloak-adapter --timeout=120s >/dev/null
+kind_kubectl -n "$NS" rollout restart deploy/eventing-keycloak-adapter >/dev/null
+kind_kubectl -n "$NS" rollout status deploy/eventing-keycloak-adapter --timeout=120s >/dev/null
 sleep 15
 [[ $(logins) == "$total" ]] && pass "no duplicates after a restart" || fail "logins published again"
 
@@ -109,7 +117,10 @@ reader_token=$(printf %s "$reader_secret" | curl -sS --fail-with-body --cacert "
   "https://$BASE_DOMAIN:$PORT/keycloak/realms/master/protocol/openid-connect/token" \
   -d grant_type=client_credentials -d client_id=contrib-eventing-keycloak-reader \
   --data-urlencode client_secret@- | jq -r .access_token)
-claims=$(cut -d. -f2 <<<"$reader_token" | tr '_-' '/+' | base64 -d 2>/dev/null || true)
+# JWT parts are unpadded base64url, and base64 -d cuts off an unpadded tail.
+payload=$(cut -d. -f2 <<<"$reader_token" | tr '_-' '/+')
+while ((${#payload} % 4)); do payload+="="; done
+claims=$(base64 -d <<<"$payload" 2>/dev/null || true)
 jq -e '(.realm_access.roles // []) | index("admin") == null and index("create-realm") == null' <<<"$claims" >/dev/null &&
   pass "no admin or create-realm role" || fail "reader token has realm roles: $(jq -c .realm_access <<<"$claims")"
 # The account client's roles come with every service account's default roles; view-users brings query-users and query-groups with it.
@@ -124,8 +135,8 @@ code=$(curl -s -o /dev/null -w '%{http_code}' --cacert "$SECRET_DIR/domain-ca.cr
 
 log "Restarting the adapter does not publish again"
 total=$(($(count granted) + $(count revoked) + $(snapshots)))
-kind_kubectl -n "$NS" rollout restart deploy/openfga-adapter >/dev/null
-kind_kubectl -n "$NS" rollout status deploy/openfga-adapter --timeout=120s >/dev/null
+kind_kubectl -n "$NS" rollout restart deploy/eventing-openfga-adapter >/dev/null
+kind_kubectl -n "$NS" rollout status deploy/eventing-openfga-adapter --timeout=120s >/dev/null
 sleep 15
 [[ $(($(count granted) + $(count revoked) + $(snapshots))) == "$total" ]] && pass "no duplicates" || fail "events published again"
 
@@ -217,13 +228,14 @@ trigger=$(kind_kubectl -n "$NS" get triggers -o jsonpath='{.items[0].metadata.na
 code=$(probe "http://broker-filter.knative-eventing.svc.cluster.local/triggers/$NS/$trigger")
 [[ $code != 200 && $code != 202 ]] && pass "direct post to the broker filter is blocked" || fail "broker filter accepted a forged event"
 # NATS has no auth; a client that gets in sees the server's INFO line.
+# shellcheck disable=SC2016 # expands in the pod
 nats=$(kind_kubectl -n default run "e2e-probe-$RANDOM" --rm -i --restart=Never --quiet --image=busybox:1.36 --command -- \
   sh -c 'echo "$(sleep 2 | nc -w 3 nats.nats-io.svc.cluster.local 4222)"' </dev/null 2>/dev/null || true)
 [[ $nats != *INFO* ]] && pass "NATS is closed to other pods" || fail "another pod reached NATS"
-code=$(probe http://ingress.contrib-eventing.svc.cluster.local)
+code=$(probe "$INGRESS_URL")
 [[ $code == 401 ]] && pass "ingress without token: 401" || fail "ingress without token: $code"
 token=$(kind_kubectl -n default create token default --audience contrib-eventing)
-code=$(probe http://ingress.contrib-eventing.svc.cluster.local "$token")
+code=$(probe "$INGRESS_URL" "$token")
 [[ $code == 403 ]] && pass "ingress with another workload's token: 403" || fail "ingress with foreign token: $code"
 host=eventing.services.$BASE_DOMAIN
 # -k: the platform's certificate covers *.<domain> but not *.services.<domain>,

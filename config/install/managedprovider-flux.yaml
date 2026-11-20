@@ -1,0 +1,23 @@
+# Like managedprovider.yaml, but straight from the chart in the OCI registry,
+# without OCM.
+apiVersion: providers.platform-mesh.io/v1alpha1
+kind: ManagedProvider
+metadata:
+  name: eventing
+  namespace: platform-mesh-system
+spec:
+  platformMeshRef:
+    name: platform-mesh
+  cleanupOnDelete: false
+  runtimeDeployments:
+    - flux:
+        registry: ghcr.io/platform-mesh/contrib-eventing/charts
+        chart: eventing
+        version: 0.1.0
+        values:
+          httpRoute:
+            baseDomain: ""
+          allowedSinkHosts: []
+          userClaim: email
+          # keycloak:
+          #   readerSecret: contrib-eventing-keycloak-reader

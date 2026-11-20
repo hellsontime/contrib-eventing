@@ -1,0 +1,68 @@
+{{- $c := dict "ctx" . "component" "openfga-adapter" }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "eventing.name" $c }}
+  labels:
+    {{- include "eventing.labels" $c | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "eventing.selectorLabels" $c | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "eventing.selectorLabels" $c | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "eventing.name" $c }}
+      {{- include "eventing.podSpec" . | nindent 6 }}
+      containers:
+        - name: adapter
+          image: {{ include "eventing.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - openfga-adapter
+            - --user-claim={{ .Values.userClaim }}
+            - --openfga-url={{ .Values.openfga.url }}
+            - --keycloak-url={{ .Values.keycloak.url }}
+            - --ingress-url={{ include "eventing.ingressURL" . }}
+            {{- if .Values.core.kubeconfigSecret }}
+            - --core-kubeconfig=/kcp/kubeconfig
+            {{- else }}
+            - --core-kubeconfig=
+            {{- end }}
+          env:
+            - name: POD_NAMESPACE
+              valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
+          volumeMounts:
+            - {name: token, mountPath: /var/run/secrets/contrib-eventing, readOnly: true}
+            {{- if .Values.core.kubeconfigSecret }}
+            # The whole Secret, because the kubeconfig reads the rotating token
+            # from the file next to it.
+            - {name: kcp, mountPath: /kcp, readOnly: true}
+            {{- end }}
+            {{- if .Values.keycloak.readerSecret }}
+            - {name: keycloak, mountPath: /var/run/secrets/keycloak, readOnly: true}
+            {{- end }}
+          securityContext:
+            {{- include "eventing.containerSecurityContext" . | nindent 12 }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        # A token only the ingress accepts.
+        - name: token
+          projected:
+            sources:
+              - serviceAccountToken: {path: token, audience: contrib-eventing, expirationSeconds: 3600}
+        {{- if .Values.core.kubeconfigSecret }}
+        - name: kcp
+          secret: {secretName: {{ .Values.core.kubeconfigSecret }}}
+        {{- end }}
+        {{- if .Values.keycloak.readerSecret }}
+        # Without it member snapshots have no names.
+        - name: keycloak
+          secret: {secretName: {{ .Values.keycloak.readerSecret }}, optional: true}
+        {{- end }}

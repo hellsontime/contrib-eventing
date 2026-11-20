@@ -36,12 +36,14 @@ The rules that matter:
 
 ## 2. Create a Subscription
 
-Subscriptions live in the workspace `root:providers:eventing`, which only
-platform admins can reach. With the repo's scripts on a local setup:
+Subscriptions live in eventing's provider workspace
+`root:providers:eventing-<id>`, which only platform admins can reach. With the
+repo's scripts on a local setup:
 
 ```sh
 source hack/lib.sh
-kcp root:providers:eventing apply -f - <<EOF
+ws=$(eventing_workspace)
+kcp "$ws" apply -f - <<EOF
 apiVersion: eventing.platform-mesh.io/v1alpha1
 kind: Subscription
 metadata:
@@ -62,7 +64,7 @@ spec:
     deadLetterSink:  # optional
       uri: http://my-dead-letters.my-namespace.svc.cluster.local
 EOF
-kcp root:providers:eventing get subscriptions
+kcp "$ws" get subscriptions
 ```
 
 `delivery` is optional; without it you get 10 retries with exponential

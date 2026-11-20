@@ -5,8 +5,8 @@ log "Subscribing event-display to membership events"
 kind_kubectl apply -f "$ROOT/config/samples/event-display.yaml" >/dev/null
 kind_kubectl -n eventing-demo-sink rollout status deploy/event-display --timeout=120s >/dev/null
 
-kcp root:providers:eventing apply -f "$ROOT/config/samples/subscription.yaml" >/dev/null
-kcp root:providers:eventing wait --for=condition=Ready subscription/memberships-to-event-display --timeout=120s >/dev/null
+kcp "$EVENTING_WS" apply -f "$ROOT/config/samples/subscription.yaml" >/dev/null
+kcp "$EVENTING_WS" wait --for=condition=Ready subscription/memberships-to-event-display --timeout=120s >/dev/null
 
 cat <<EOF
 

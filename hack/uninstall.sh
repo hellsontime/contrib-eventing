@@ -15,15 +15,22 @@ done
 
 source "$ROOT/hack/steps/00-preflight.sh"
 
-log "Removing Subscriptions"
-# The controller is still running and removes the Triggers on the way.
-kcp root:providers:eventing delete subscriptions --all --timeout=60s >/dev/null 2>&1 || true
+if kind_kubectl -n "$NS" get secret "$PROVIDER-provider-kubeconfig" >/dev/null 2>&1; then
+  ws=$(eventing_workspace)
+  # A half finished install may never have bound the API.
+  if [[ $(kcp "$ws" get apibinding eventing.platform-mesh.io --ignore-not-found -o jsonpath='{.status.phase}') == Bound ]]; then
+    log "Removing Subscriptions"
+    # The controller is still running and removes the Triggers on the way.
+    kcp "$ws" delete subscriptions --all --timeout=60s >/dev/null
+  else
+    log "The eventing API is not bound in $ws, no Subscriptions to remove"
+  fi
+fi
 
 # Undo exactly what hack/steps/45-keycloak-reader.sh changed (a stopgap until
-# platform-mesh/platform-mesh#578). It has to run before the namespace goes,
-# because the ConfigMap with what was changed lives there.
+# platform-mesh/platform-mesh#578).
 log "Reverting the Keycloak stopgap"
-stopgap=$(kind_kubectl -n "$NS" get configmap keycloak-reader-stopgap -o json 2>/dev/null || true)
+stopgap=$(kind_kubectl -n "$NS" get configmap eventing-keycloak-reader-stopgap -o json 2>/dev/null || true)
 for realm in $(jq -r '.data // {} | keys[] | select(. != "contrib-eventing-keycloak-reader")' <<<"${stopgap:-null}"); do
   mode=$(jq -r --arg r "$realm" '.data[$r]' <<<"$stopgap")
   # The realm may be gone already.
@@ -46,23 +53,35 @@ fi
 login_uuid=$(keycloak GET "/admin/realms/$ORG/clients?clientId=contrib-eventing-login-test" 2>/dev/null | jq -r '.[0].id // empty' || true)
 [[ -z $login_uuid ]] || keycloak DELETE "/admin/realms/$ORG/clients/$login_uuid" -o /dev/null
 
-log "Removing the components and the broker"
-kind_kubectl delete ns "$NS" eventing-demo-sink --ignore-not-found --wait=false >/dev/null
-kind_kubectl delete clusterrolebinding contrib-eventing-ingress-auth-delegator --ignore-not-found >/dev/null
-kind_kubectl -n knative-eventing delete networkpolicy contrib-eventing-broker-ingress contrib-eventing-channel contrib-eventing-broker-filter --ignore-not-found >/dev/null 2>&1 || true
+# The operator uninstalls the chart and deletes the provider workspace with the
+# eventing API and the provider kubeconfig.
+log "Removing ManagedProvider $PROVIDER"
+kind_kubectl -n "$NS" delete managedprovider "$PROVIDER" --ignore-not-found --timeout=300s >/dev/null
+# What the components created themselves. The chart keeps its NetworkPolicies,
+# so they go only once the Broker is gone and nothing can reach it unchecked.
+if kind_kubectl get crd brokers.eventing.knative.dev >/dev/null 2>&1; then
+  # The broker's channel has a finalizer that the JetStream controller removes.
+  kind_kubectl -n "$NS" delete broker default --ignore-not-found --timeout=300s >/dev/null ||
+    die "Broker $NS/default is not gone, its NetworkPolicies stay"
+fi
+kind_kubectl -n knative-eventing delete networkpolicy -l "app.kubernetes.io/name=eventing,app.kubernetes.io/instance=$PROVIDER" \
+  --ignore-not-found >/dev/null
+kind_kubectl -n "$NS" delete configmap eventing-openfga-adapter-state eventing-keycloak-adapter-state --ignore-not-found >/dev/null
+# The reader Secret is the stopgap's, unless security-operator manages the client.
+if [[ -n $stopgap ]]; then
+  kind_kubectl -n "$NS" delete secret contrib-eventing-keycloak-reader --ignore-not-found >/dev/null
+  kind_kubectl -n "$NS" delete configmap eventing-keycloak-reader-stopgap --ignore-not-found >/dev/null
+fi
+kind_kubectl delete ns eventing-demo-sink --ignore-not-found --wait=false >/dev/null
 
-# The provider connections have to go before the export. The platform-mesh-operator
-# stops at the first connection it cannot handle.
-log "Removing the eventing API from kcp"
-for secret in contrib-eventing-kcp contrib-eventing-core; do
-  index=$(kind_kubectl -n platform-mesh-system get platformmesh platform-mesh -o json |
-    jq --arg s "$secret" '(.spec.kcp.extraProviderConnections // []) | map(.secret) | index($s) // empty')
-  if [[ -n $index ]]; then
-    kind_kubectl -n platform-mesh-system patch platformmesh platform-mesh --type json \
-      -p "[{\"op\": \"remove\", \"path\": \"/spec/kcp/extraProviderConnections/$index\"}]" >/dev/null
-  fi
-done
-kcp root:providers delete workspace eventing --ignore-not-found >/dev/null
+log "Removing the core.platform-mesh.io connection"
+index=$(kind_kubectl -n platform-mesh-system get platformmesh platform-mesh -o json |
+  jq '(.spec.kcp.extraProviderConnections // []) | map(.secret) | index("contrib-eventing-core") // empty')
+if [[ -n $index ]]; then
+  kind_kubectl -n platform-mesh-system patch platformmesh platform-mesh --type json \
+    -p "[{\"op\": \"remove\", \"path\": \"/spec/kcp/extraProviderConnections/$index\"}]" >/dev/null
+fi
+kind_kubectl -n "$NS" delete secret contrib-eventing-core --ignore-not-found >/dev/null
 
 if ! $keep_org; then
   log "Removing demo organization $ORG"
@@ -70,9 +89,6 @@ if ! $keep_org; then
 fi
 
 if ! $keep_knative; then
-  # The broker's channel has a finalizer that the JetStream controller removes,
-  # so the namespace has to be gone before Knative goes.
-  kind_kubectl wait --for=delete ns/"$NS" --timeout=300s >/dev/null 2>&1 || true
   log "Removing Knative Eventing"
   dir=$SECRET_DIR/knative-$KNATIVE_VERSION
   # in-memory-channel.yaml is from older installs.
@@ -85,7 +101,7 @@ fi
 
 # Wait until everything is really gone, so install.sh can run right after.
 log "Waiting for the deletions to finish"
-kind_kubectl wait --for=delete ns/"$NS" ns/eventing-demo-sink ns/knative-eventing ns/nats-io --timeout=300s >/dev/null 2>&1 || true
+kind_kubectl wait --for=delete ns/eventing-demo-sink ns/knative-eventing ns/nats-io --timeout=300s >/dev/null 2>&1 || true
 if ! $keep_org; then
   org_gone() { ! kcp root:orgs get workspace "$ORG" >/dev/null 2>&1; }
   wait_for "workspace root:orgs:$ORG to be deleted" 300 org_gone

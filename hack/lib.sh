@@ -19,7 +19,12 @@ DEMO_USER=${DEMO_USER:-$ORG@example.com}
 KNATIVE_VERSION=${KNATIVE_VERSION:-v1.23.1}
 NATSS_VERSION=${NATSS_VERSION:-v1.23.3}
 IMAGE=${IMAGE:-ghcr.io/platform-mesh/contrib-eventing:dev}
-NS=contrib-eventing
+# A registry container on the kind network for the OCM component and the image.
+REGISTRY=${REGISTRY:-kind-registry}
+REGISTRY_PORT=${REGISTRY_PORT:-5001}
+# Eventing runs next to the platform, as ManagedProvider "eventing".
+NS=platform-mesh-system
+PROVIDER=eventing
 
 log() { printf '\033[1m==> %s\033[0m\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
@@ -88,3 +93,15 @@ wait_for() {
     sleep 3
   done
 }
+
+# The provider workspace the platform-mesh-operator created for the
+# ManagedProvider, root:providers:eventing-<id>. Read from the logical cluster
+# in the provider kubeconfig.
+eventing_workspace() {
+  local server cluster
+  server=$(kind_kubectl -n "$NS" get secret "$PROVIDER-provider-kubeconfig" -o jsonpath='{.data.kubeconfig}' |
+    base64 -d | jq -Rrs 'capture("server: *(?<s>\\S+)").s') || die "no Secret $NS/$PROVIDER-provider-kubeconfig"
+  cluster=${server##*/clusters/}
+  kcp "$cluster" get logicalcluster cluster -o jsonpath='{.metadata.annotations.kcp\.io/path}'
+}
+

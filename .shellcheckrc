@@ -1,0 +1,6 @@
+# hack/steps/*.sh have no shebang, install.sh sources them.
+shell=bash
+# The scripts source each other by paths built at runtime.
+disable=SC1090,SC1091
+# `check && pass || fail` is how the tests report.
+disable=SC2015

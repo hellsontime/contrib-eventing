@@ -1,0 +1,10 @@
+# Add to the PlatformMesh's spec.kcp.extraProviderConnections. The operator
+# writes a kubeconfig for the core.platform-mesh.io export into Secret
+# contrib-eventing-core, which the OpenFGA adapter reads account paths with.
+# Without it events have no accountPath; set the chart's core.kubeconfigSecret
+# to "" then.
+- path: root:platform-mesh-system
+  apiExportNames: [core.platform-mesh.io]
+  secret: contrib-eventing-core
+  namespace: platform-mesh-system
+  adminAuth: false

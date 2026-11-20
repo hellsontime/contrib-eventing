@@ -1,0 +1,22 @@
+# The OCM component of a release, built by hack/ocm-component.sh.
+components:
+  - name: github.com/platform-mesh/contrib-eventing
+    version: {{ .VERSION }}
+    provider:
+      name: platform-mesh
+    resources:
+      # ManagedProvider ocm: deploys the resource named chart by default.
+      - name: chart
+        type: helmChart
+        version: {{ .VERSION }}
+        input:
+          type: helm
+          path: ../charts/eventing
+          version: {{ .VERSION }}
+      - name: image
+        type: ociImage
+        relation: local
+        version: {{ .VERSION }}
+        access:
+          type: ociArtifact
+          imageReference: {{ .IMAGE }}

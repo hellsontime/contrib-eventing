@@ -1,0 +1,75 @@
+{{- $c := dict "ctx" . "component" "ingress" }}
+{{- $publishers := list (printf "system:serviceaccount:%s:%s" .Release.Namespace (include "eventing.name" (dict "ctx" . "component" "openfga-adapter"))) }}
+{{- if .Values.keycloak.readerSecret }}
+{{- $publishers = append $publishers (printf "system:serviceaccount:%s:%s" .Release.Namespace (include "eventing.name" (dict "ctx" . "component" "keycloak-adapter"))) }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "eventing.name" $c }}
+  labels:
+    {{- include "eventing.labels" $c | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "eventing.selectorLabels" $c | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "eventing.selectorLabels" $c | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "eventing.name" $c }}
+      {{- include "eventing.podSpec" . | nindent 6 }}
+      containers:
+        - name: ingress
+          image: {{ include "eventing.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - ingress
+            - --publishers={{ join "," $publishers }}
+            - --broker-ingress={{ .Values.knative.brokerIngress }}
+          env:
+            - name: POD_NAMESPACE
+              valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
+          ports:
+            - containerPort: 8080
+          securityContext:
+            {{- include "eventing.containerSecurityContext" . | nindent 12 }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "eventing.name" $c }}
+  labels:
+    {{- include "eventing.labels" $c | nindent 4 }}
+spec:
+  selector:
+    {{- include "eventing.selectorLabels" $c | nindent 4 }}
+  ports:
+    - port: 80
+      targetPort: 8080
+{{- if .Values.httpRoute.enabled }}
+---
+# Makes the ingress reachable from outside the cluster through the platform's
+# Gateway. The terminate-services listener takes routes from any namespace for
+# hosts below services.<domain>.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "eventing.name" $c }}
+  labels:
+    {{- include "eventing.labels" $c | nindent 4 }}
+spec:
+  parentRefs:
+    - {{- toYaml .Values.httpRoute.parentRef | nindent 6 }}
+  hostnames: [eventing.services.{{ .Values.httpRoute.baseDomain }}]
+  rules:
+    - backendRefs:
+        - name: {{ include "eventing.name" $c }}
+          port: 80
+{{- end }}

@@ -39,6 +39,20 @@ func (c *SubscriptionControllerConfig) AddFlags(fs *pflag.FlagSet) {
 	fs.StringSliceVar(&c.AllowedSinkHosts, "allowed-sink-hosts", c.AllowedSinkHosts, "hosts sinks and dead letter sinks may point at, exact or *.suffix; empty allows none")
 }
 
+type KCPSetupConfig struct {
+	KCPKubeconfig string
+	Timeout       time.Duration
+}
+
+func NewKCPSetupConfig() KCPSetupConfig {
+	return KCPSetupConfig{KCPKubeconfig: "/kcp/kubeconfig", Timeout: 2 * time.Minute}
+}
+
+func (c *KCPSetupConfig) AddFlags(fs *pflag.FlagSet) {
+	fs.StringVar(&c.KCPKubeconfig, "kcp-kubeconfig", c.KCPKubeconfig, "kubeconfig for the provider workspace in kcp")
+	fs.DurationVar(&c.Timeout, "timeout", c.Timeout, "how long to wait for the APIBinding and the APIExportEndpointSlice")
+}
+
 // KeycloakConfig is how components reach Keycloak, with a client of the master
 // realm that only has view-events and view-users.
 type KeycloakConfig struct {
@@ -86,7 +100,7 @@ func NewKeycloakAdapterConfig() KeycloakAdapterConfig {
 	return KeycloakAdapterConfig{
 		KeycloakConfig: NewKeycloakConfig(),
 		SkipRealms:     []string{"master", "welcome"},
-		IngressURL:     "http://ingress.contrib-eventing.svc.cluster.local",
+		IngressURL:     "http://eventing-ingress.platform-mesh-system.svc.cluster.local",
 		TokenFile:      "/var/run/secrets/contrib-eventing/token",
 		Interval:       5 * time.Second,
 		Namespace:      os.Getenv("POD_NAMESPACE"),
@@ -124,7 +138,7 @@ func NewOpenFGAAdapterConfig() OpenFGAAdapterConfig {
 		KeycloakConfig: NewKeycloakConfig(),
 		OpenFGAURL:     "http://openfga.platform-mesh-system.svc.cluster.local:8080",
 		SkipStores:     []string{"orgs"},
-		IngressURL:     "http://ingress.contrib-eventing.svc.cluster.local",
+		IngressURL:     "http://eventing-ingress.platform-mesh-system.svc.cluster.local",
 		TokenFile:      "/var/run/secrets/contrib-eventing/token",
 		Interval:       5 * time.Second,
 		Namespace:      os.Getenv("POD_NAMESPACE"),

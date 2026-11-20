@@ -1,0 +1,10 @@
+apiVersion: v2
+name: eventing
+description: Platform Mesh eventing, installed through a ManagedProvider
+type: application
+# Set from the tag when the chart is published.
+version: 0.0.0
+appVersion: 0.0.0
+home: https://github.com/platform-mesh/contrib-eventing
+sources:
+  - https://github.com/platform-mesh/contrib-eventing
