@@ -2,7 +2,7 @@
 
 This is what subscribers can rely on. It is a draft (`v1alpha1`) and may still change.
 
-Every event is a [CloudEvent 1.0](https://github.com/cloudevents/spec/blob/v1.0.2/cloudevents/spec.md) delivered over HTTP. The contract does not depend on which system produced the change: today membership events come from OpenFGA and login events from Keycloak, but another adapter could produce the same events from a different authorization engine or identity provider.
+Every event is a [CloudEvent 1.0](https://github.com/cloudevents/spec/blob/v1.0.2/cloudevents/spec.md) delivered over HTTP. The contract does not depend on which system produced the change: today membership and user created and deleted events come from OpenFGA and login events from Keycloak, but another adapter could produce the same events from a different authorization engine or identity provider.
 
 ## Membership events
 
@@ -190,10 +190,65 @@ Attributes are as for membership events, with these differences:
 
 - **No IP address, session or client.** Keycloak records them, the event leaves them out.
 - **Org realms only.** Logins to the `welcome` and `master` realms are not published, because they have no org.
-- **Only with the bundled Keycloak, for now.** The type has no Keycloak details, so an adapter for another identity provider could send the same events, but today they only come from Keycloak's event store. User created and deleted events will come from the `User` resource instead, so they work with any provider.
+- **Only with the bundled Keycloak, for now.** The type has no Keycloak details, so an adapter for another identity provider could send the same events, but today they only come from Keycloak's event store.
 - **Duplicates** share the `id`; drop them.
 - **Logins can be lost.** Keycloak keeps stored events for seven days by default. If the adapter is down for longer, the logins in between are never published.
 - **Nothing from before eventing was installed.** Logins in an org that existed at install time count from the install; an org created later counts from its first login.
+
+## User created and deleted
+
+Sent when a user joins or leaves an org.
+
+| Type | Meaning |
+| --- | --- |
+| `io.platform-mesh.iam.user.created.v1alpha1` | The user got their first role in the org, on any of its accounts. An invite gives a role, so it counts |
+| `io.platform-mesh.iam.user.deleted.v1alpha1` | The user's last role in the org was removed |
+
+```json
+{
+  "specversion": "1.0",
+  "id": "5e2d8c1b7a6f4e3d9c0b1a2f3e4d5c6b",
+  "source": "platform-mesh.io/orgs/acme/iam",
+  "type": "io.platform-mesh.iam.user.created.v1alpha1",
+  "subject": "users/alice@example.com",
+  "time": "2026-10-01T09:10:02.512Z",
+  "pmorg": "acme",
+  "datacontenttype": "application/json",
+  "data": {
+    "org": "acme",
+    "user": {
+      "id": "alice@example.com",
+      "email": "alice@example.com",
+      "firstName": "Alice",
+      "lastName": "Liddell"
+    }
+  }
+}
+```
+
+A deleted user has `"user": { "id": "alice@example.com" }` and nothing else.
+Attributes are as for login events; `time` is when the role changed.
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `org` | yes | org name |
+| `user.id` | yes | the user, by the same rule as in membership events |
+| `user.email`, `user.firstName`, `user.lastName` | no | only on created, by the same rules as in member lists. Invited users have no names yet |
+| `errors` | no | only on created, as in member lists. The created event isn't sent again with names; they arrive with the next member list and the user's first login |
+
+- **Joining and leaving, not accounts.** A user in two orgs gets a created
+  event in each. Further roles in the same org, or losing one of several, send
+  nothing; membership events and snapshots say who has which role.
+- **Deleted means removed from this org.** It is not a request to erase the
+  person everywhere. Subscribers who store personal data about the user are
+  responsible for deleting it as their own obligations require; the event is
+  the signal to check.
+- **From membership, for now.** Today they are derived from the roles in
+  OpenFGA and sent with the `granted` or `revoked` that made the change, with
+  an `id` of their own that the same change always gives. Once the `User`
+  resource of ADR 018 exists they come from it, with the same types and fields.
+- **Same limits as membership.** Org deletion sends no deleted events, and
+  nothing from before eventing was installed is sent.
 
 ## What subscribers should expect
 

@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -59,6 +58,8 @@ func (f *fakeBackends) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.URL.Path == "/stores":
 		_, _ = fmt.Fprint(w, `{"stores": [{"id": "s-acme", "name": "acme"}]}`)
+	case strings.HasSuffix(r.URL.Path, "/changes") && r.URL.Query().Get("continuation_token") == "after-page":
+		_, _ = fmt.Fprint(w, `{"changes": [], "continuation_token": "after-page"}`)
 	case strings.HasSuffix(r.URL.Path, "/changes"):
 		_, _ = fmt.Fprint(w, f.changes)
 	case strings.HasSuffix(r.URL.Path, "/read"):
@@ -86,17 +87,8 @@ func (f *fakeBackends) serveRead(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	var out []any
 	if req.TupleKey.User != "" {
-		objects := make([]string, 0, len(tuples))
-		for o := range tuples {
-			objects = append(objects, o)
-		}
-		sort.Strings(objects)
-		for _, o := range objects {
-			for _, k := range tuples[o] {
-				if k.User == req.TupleKey.User && strings.HasPrefix(k.Object, req.TupleKey.Object) {
-					out = append(out, map[string]any{"key": k})
-				}
-			}
+		for _, k := range userTuples(req.TupleKey.User, req.TupleKey.Object) {
+			out = append(out, map[string]any{"key": k})
 		}
 	} else {
 		for _, k := range tuples[req.TupleKey.Object] {
@@ -230,13 +222,13 @@ func TestFirstLoginKeycloakDown(t *testing.T) {
 	h.backends.setKeycloak(false)
 	h.backends.changes = threeChanges
 	require.NoError(t, h.adapter.poll(ctx))
-	assert.Len(t, h.published, 5, "three changes and two snapshots, no login")
+	assert.Len(t, h.published, 7, "three changes, two user events and two snapshots, no login")
 	assert.Equal(t, since, loadedState(t, h.adapter)["acme"].Logins.Since, "the login cursor stays")
 
 	h.backends.changes = `{"changes": []}`
 	h.backends.setKeycloak(true)
 	require.NoError(t, h.adapter.poll(ctx))
-	assert.Len(t, h.published, 6, "the login's snapshot follows")
+	assert.Len(t, h.published, 8, "the login's snapshot follows")
 }
 
 // A Keycloak that hangs delays no membership events, of any org.
@@ -261,7 +253,7 @@ func TestFirstLoginKeycloakHangs(t *testing.T) {
 	start := time.Now()
 	require.NoError(t, h.adapter.poll(context.Background()))
 	assert.Less(t, time.Since(start), 2*time.Second)
-	assert.Len(t, h.published, 10, "the changes and snapshots of both orgs")
+	assert.Len(t, h.published, 14, "the changes of both orgs")
 	state := loadedState(t, h.adapter)
 	assert.NotEmpty(t, state["acme"].Token)
 	assert.NotEmpty(t, state["beta"].Token)

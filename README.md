@@ -37,6 +37,8 @@ More detail: [architecture](docs/architecture.md), [event contract](docs/contrac
   snapshots of their accounts, too.
 - A login event after every login to an org's Keycloak realm, with the user's
   email and names.
+- An event when a user joins an org (their first role in it, an invite
+  included) or leaves it (their last role removed), read from OpenFGA.
 - Subscriptions for platform admins, covering all orgs or some of them, with
   retries, timeouts and dead letter sinks. Sinks must be on the platform
   operator's allowlist.

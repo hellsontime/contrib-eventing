@@ -143,6 +143,34 @@ wait_for "membership.revoked for the invited user" 30 more_than revoked "$before
 # shellcheck disable=SC2016 # expands in eval
 wait_for "a snapshot without the invited user" 30 eval '! listed "$invited"'
 
+log "Users joining and leaving the org are announced"
+users() { sink_logs | grep -c "type: io.platform-mesh.iam.user.$1" || true; }
+more_users_than() { (($(users "$1") > $2)); }
+last_user_event() { sink_logs | grep -A23 "type: io.platform-mesh.iam.user.$1" | tail -24; }
+# An invite writes the role for the email, before the user exists anywhere.
+joiner=joiner-$RANDOM@example.com
+before_created=$(users created)
+before_deleted=$(users deleted)
+before_revoked=$(count revoked)
+add_member "$joiner" member
+wait_for "user.created at the sink" 30 more_users_than created "$before_created"
+event=$(last_user_event created)
+grep -q "subject: users/$joiner" <<<"$event" && pass "user.created for the invited $joiner" || fail "user.created subject missing"
+grep -q "\"email\": \"$joiner\"" <<<"$event" && pass "user.created has the email" || fail "user.created email missing"
+# A second role and losing one of two say nothing about the org. A user event
+# follows its change right away, so a few seconds after the revoke are enough.
+add_member "$joiner" owner
+add_member --remove "$joiner" member
+wait_for "the revoke of one of two roles" 30 more_than revoked "$before_revoked"
+sleep 5
+[[ $(users created) == $((before_created + 1)) && $(users deleted) == "$before_deleted" ]] &&
+  pass "nothing for a second role or losing one of two" || fail "user events for a second role"
+add_member --remove "$joiner" owner
+wait_for "user.deleted at the sink" 30 more_users_than deleted "$before_deleted"
+event=$(last_user_event deleted)
+grep -q "subject: users/$joiner" <<<"$event" && pass "user.deleted for $joiner" || fail "user.deleted subject missing"
+grep -q '"email"\|"firstName"' <<<"$event" && fail "user.deleted has a profile" || pass "user.deleted has only the id"
+
 log "The reader token has no admin"
 reader_secret=$(kind_kubectl -n "$NS" get secret contrib-eventing-keycloak-reader -o jsonpath='{.data.client_secret}' | base64 -d)
 reader_token=$(printf %s "$reader_secret" | curl -sS --fail-with-body --cacert "$SECRET_DIR/domain-ca.crt" \

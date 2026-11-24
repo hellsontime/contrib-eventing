@@ -202,23 +202,41 @@ func (a *Adapter) publishAllFirstLogins(ctx context.Context, orgs []string, stat
 // one fails, the whole page is read again next time. Consumers drop the
 // repeats by event id.
 func (a *Adapter) publishNew(ctx context.Context, org string, st *orgState) (bool, error) {
+	pages, err := a.readNew(ctx, st.StoreID, st.Token, st.Since)
+	if err != nil {
+		return false, err
+	}
+	u, err := a.joinsAndLeaves(ctx, st, pages)
+	if err != nil {
+		return false, err
+	}
 	moved := false
-	for {
-		changes, next, err := a.FGA.Changes(ctx, st.StoreID, "role", st.Token, st.Since, pageSize)
-		if err != nil {
-			return moved, err
-		}
+	for _, p := range u.pages {
 		// The accounts that changed in this page, in order, with their last change.
 		var accounts []membership
 		last := map[string]Change{}
-		for _, c := range changes {
+		for _, c := range p.changes {
 			m, ok := parseMembership(c.TupleKey)
 			if !ok {
 				continue
 			}
 			key := changeKey(c)
+			if u.joins[key] == joined {
+				if err := a.publishCreated(ctx, org, m.user, key, c.Timestamp); err != nil {
+					return moved, err
+				}
+			}
 			if err := a.publishChange(ctx, org, m, c, key); err != nil {
 				return moved, err
+			}
+			if u.joins[key] == left {
+				e, err := contract.Deleted(org, m.user, key, c.Timestamp)
+				if err == nil {
+					err = a.publish(ctx, org, e)
+				}
+				if err != nil {
+					return moved, err
+				}
 			}
 			id := contract.AccountID(m.cluster, m.account)
 			if _, seen := last[id]; !seen {
@@ -232,14 +250,160 @@ func (a *Adapter) publishNew(ctx context.Context, org string, st *orgState) (boo
 				return moved, err
 			}
 		}
-		if next != "" && next != st.Token {
-			st.Token = next
+		if p.next != "" && p.next != st.Token {
+			st.Token = p.next
 			moved = true
 		}
+	}
+	return moved, nil
+}
+
+type page struct {
+	changes []Change
+	next    string
+}
+
+// readNew reads the changelog from token, or from since without one, to its
+// end.
+func (a *Adapter) readNew(ctx context.Context, storeID, token string, since time.Time) ([]page, error) {
+	var pages []page
+	for {
+		changes, next, err := a.FGA.Changes(ctx, storeID, "role", token, since, pageSize)
+		if err != nil {
+			return nil, err
+		}
+		pages = append(pages, page{changes: changes, next: next})
+		if next != "" {
+			token = next
+		}
 		if len(changes) < pageSize {
-			return moved, nil
+			return pages, nil
 		}
 	}
+}
+
+const (
+	joined = 1
+	left   = -1
+)
+
+// maxRereads bounds how often joinsAndLeaves reads again because the changelog
+// moved while it read the users' roles.
+const maxRereads = 5
+
+// unread is the org's unread changelog with the changes that made a user join
+// or leave, by change key.
+type unread struct {
+	pages []page
+	joins map[string]int
+}
+
+// joinsAndLeaves finds the changes that gave a user their first role in the
+// org and those that took their last one, by change key. It reads the users'
+// roles now and goes back through the changes, so the answer for a change is
+// the same however late or often it is read. Roles are read after the end of
+// the changelog; if the changelog moved meanwhile, the new changes are added
+// to the pages and their users read again.
+func (a *Adapter) joinsAndLeaves(ctx context.Context, st *orgState, pages []page) (unread, error) {
+	roles := map[string]map[string]bool{}
+	readUsers := func(ps []page) error {
+		read := map[string]bool{}
+		for _, p := range ps {
+			for _, c := range p.changes {
+				m, ok := parseMembership(c.TupleKey)
+				if !ok || read[m.user] {
+					continue
+				}
+				read[m.user] = true
+				tuples, err := a.FGA.ReadUser(ctx, st.StoreID, "user:"+m.user, "role")
+				if err != nil {
+					return err
+				}
+				roles[m.user] = map[string]bool{}
+				for _, t := range tuples {
+					if r, ok := parseMembership(t); ok && r.user == m.user {
+						roles[m.user][t.Object] = true
+					}
+				}
+			}
+		}
+		return nil
+	}
+	newPages := pages
+	for i := 0; ; i++ {
+		if err := readUsers(newPages); err != nil {
+			return unread{}, err
+		}
+		if len(roles) == 0 {
+			break
+		}
+		if i == maxRereads {
+			return unread{}, fmt.Errorf("the changelog kept changing while reading roles")
+		}
+		more, err := a.readNew(ctx, st.StoreID, lastToken(pages, st.Token), st.Since)
+		if err != nil {
+			return unread{}, err
+		}
+		if countChanges(more) == 0 {
+			break
+		}
+		pages, newPages = append(pages, more...), more
+	}
+
+	joins := map[string]int{}
+	for i := len(pages) - 1; i >= 0; i-- {
+		for j := len(pages[i].changes) - 1; j >= 0; j-- {
+			c := pages[i].changes[j]
+			m, ok := parseMembership(c.TupleKey)
+			if !ok {
+				continue
+			}
+			have := roles[m.user]
+			if c.Operation == opWrite {
+				if !have[c.TupleKey.Object] {
+					a.warnMismatch(st, m.user, c)
+				}
+				delete(have, c.TupleKey.Object)
+				if len(have) == 0 {
+					joins[changeKey(c)] = joined
+				}
+				continue
+			}
+			if have[c.TupleKey.Object] {
+				a.warnMismatch(st, m.user, c)
+			}
+			if len(have) == 0 || (len(have) == 1 && have[c.TupleKey.Object]) {
+				joins[changeKey(c)] = left
+			}
+			have[c.TupleKey.Object] = true
+		}
+	}
+	return unread{pages: pages, joins: joins}, nil
+}
+
+// warnMismatch logs a change that doesn't fit the user's current roles, for
+// example a grant of a role they don't have and that no later change revoked.
+// Created and deleted for that user may then be wrong.
+func (a *Adapter) warnMismatch(st *orgState, user string, c Change) {
+	a.Log.Warn().Str("store", st.StoreID).Str("userId", user).Str("object", c.TupleKey.Object).
+		Str("operation", c.Operation).Msg("changelog doesn't match the user's roles, user created or deleted may be wrong")
+}
+
+func lastToken(pages []page, token string) string {
+	for _, p := range pages {
+		if p.next != "" {
+			token = p.next
+		}
+	}
+	return token
+}
+
+func countChanges(pages []page) int {
+	n := 0
+	for _, p := range pages {
+		n += len(p.changes)
+	}
+	return n
 }
 
 // changeKey identifies a change in the changelog.
@@ -260,6 +424,22 @@ func (a *Adapter) publishChange(ctx context.Context, org string, m membership, c
 		Role:        m.role,
 		User:        contract.User{ID: m.user},
 	}, key, c.Timestamp)
+	if err != nil {
+		return err
+	}
+	return a.publish(ctx, org, e)
+}
+
+// publishCreated announces a user who got their first role in the org, with
+// email and names by the same rules as a members snapshot.
+func (a *Adapter) publishCreated(ctx context.Context, org, user, key string, at time.Time) error {
+	m := []contract.Member{{User: contract.User{ID: user}}}
+	u := contract.UserCreated{Org: org}
+	if !a.addProfiles(ctx, org, m) {
+		u.Errors = []contract.SnapshotError{contract.ErrorNamesUnavailable}
+	}
+	u.User = m[0].User
+	e, err := contract.Created(u, key, at)
 	if err != nil {
 		return err
 	}

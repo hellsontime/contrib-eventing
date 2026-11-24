@@ -6,7 +6,7 @@ This page explains the parts of the eventing module and how an event travels thr
 
 Eventing tells other systems when something changes in the platform, so they don't have to poll for it.
 
-- **Sources.** An adapter watches a system of record and turns each change into an event. Today that is who is a member of which account (OpenFGA changelog) and who logged in (Keycloak event store). After a membership change it also sends the full member list of the account, with names from Keycloak where it has access, so a consumer can catch up even if it missed events.
+- **Sources.** An adapter watches a system of record and turns each change into an event. Today that is who is a member of which account and who joined or left an org (OpenFGA changelog), and who logged in (Keycloak event store). After a membership change it also sends the full member list of the account, with names from Keycloak where it has access, so a consumer can catch up even if it missed events.
 - **Events.** Every event has the same shape: a type, an id, the org it belongs to, and the data (CloudEvents over HTTP, see the [contract](contract.md)).
 - **Ingress.** All events enter through one front door. It checks who is sending before it accepts anything (Kubernetes token review, behind the platform's Gateway).
 - **Broker.** The broker stores each event before it says "accepted", so a restart loses nothing (Knative Eventing with a NATS JetStream channel). It keeps events for a day.
@@ -60,7 +60,7 @@ Knative be reached only from the part before it (see
 
 | Part | What it does | Who builds it |
 | --- | --- | --- |
-| OpenFGA adapter | Reads the OpenFGA changelog and turns membership changes into events, plus a snapshot of the members of each changed account. With Keycloak access it also sends the snapshots of a user's accounts after their first login. If it can reach Keycloak (`view-users`), the snapshot has emails and first and last names; with the `email` claim the emails are always there | us |
+| OpenFGA adapter | Reads the OpenFGA changelog and turns membership changes into events, plus a snapshot of the members of each changed account and an event when a user joins or leaves the org. With Keycloak access it also sends the snapshots of a user's accounts after their first login. If it can reach Keycloak (`view-users`), the snapshot has emails and first and last names; with the `email` claim the emails are always there | us |
 | Keycloak adapter | Reads the login events stored by each org realm and turns them into `user.loggedin` events. Its Keycloak client only has `view-events` and `view-users` | us |
 | Ingress | Checks who is sending, then hands the event to the broker. Reachable through the platform's Gateway | us |
 | Subscription API | A kcp resource for platform admins in the eventing workspace: event types, optional orgs, target URL, retry settings | us |
@@ -106,6 +106,16 @@ sequenceDiagram
 3. The adapter posts the event to the ingress. The ingress checks the adapter's identity and forwards the event to the broker, which accepts it once the channel has stored it in NATS JetStream. Then the adapter reads the members of `team-a` and sends a snapshot the same way. Only after every event of a changelog page was accepted does the adapter move on, so nothing is skipped.
 4. A Subscription asked for membership events (of all orgs, or of `acme`). Its Trigger matches, and Knative sends the event to the subscriber's URL.
 5. If the subscriber does not answer with success, Knative retries with backoff. After the last attempt the event goes to a dead letter sink, if one is set.
+
+If Alice had no role in `acme` before, the adapter also sends `user.created`
+with the grant; when her last role goes, `user.deleted` follows the revoke. It
+reads her roles in the org's store after the end of the changelog and goes back
+through the new changes, so a change read again after a restart gives the same
+answer. For that it holds the unread changelog in memory, which after a long
+downtime can be large. If the roles can't be read, or the changelog keeps
+moving while they are read, nothing of that org goes out and the next poll
+tries the same changes again. If a change doesn't fit her current roles, the
+adapter logs a warning. This stands in until the `User` resource of ADR 018 exists.
 
 ### A login
 
