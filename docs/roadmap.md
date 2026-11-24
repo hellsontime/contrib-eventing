@@ -23,7 +23,7 @@ Each milestone ends with something that runs on a local kind setup.
    [milestone 4](milestone-4.md).
 5. **Everything the first consumer's fork sends.** Email and names in logins
    and member lists, member lists on first login, continuous programs as
-   accounts, and the contract for user created and deleted. Details:
+   accounts, user created and deleted from Keycloak. Details:
    [milestone 5](milestone-5.md).
 6. **Provider events.** Providers publish their own events through the
    ingress ([#14](https://github.com/platform-mesh/contrib-eventing/issues/14)).

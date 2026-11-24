@@ -8,9 +8,9 @@ Goal: a first consumer can use eventing
 Their own fork of iam-service publishes the full member list of an account,
 with names, after every membership change and after a login that accepts an
 invite. That is on purpose: a missed event doesn't matter, because the next one
-carries the whole list. Their subscribers resync through an API when they need to. They can't
-say whether names or ordering are used, because they don't know all their
-subscribers.
+carries the whole list. Their subscribers resync through an API when they need
+to. They can't say whether names or ordering are used, because they don't know
+all their subscribers.
 
 Our events are single changes, so we add full member lists as a second kind of
 event and let each subscriber choose.

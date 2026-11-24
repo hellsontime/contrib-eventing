@@ -1,8 +1,7 @@
 # Milestone 5
 
 Goal: Platform Mesh sends every event the first consumer's fork of iam-service
-sends, so they can drop the fork. User created and deleted wait for the `User`
-CRD of ADR 018, see decision 1.
+sends, so they can drop the fork.
 
 It builds on milestones 2 to 4 (snapshots, logins, names, the installable
 module).
@@ -31,21 +30,28 @@ the [roadmap](roadmap.md).
 ## Work
 
 1. **Email and names in logins.** `user.loggedin` gets `email`, `firstName`
-   and `lastName`, read with `view-users` through the cache that snapshots
-   already use. No new access.
+   and `lastName`, read with `view-users` like the names in snapshots. No new
+   access, but small code changes: the Keycloak client doesn't read the email
+   yet, and its cache only keeps users that have names.
 2. **Email in member lists.** Each member in `account.members` gets an
-   optional `email` next to `user.id`. It matters when `user.id` is the
-   Keycloak id (`sub` claim). Same source as the names.
+   optional `email` next to `user.id`. Under the `email` claim it is `user.id`
+   itself, so it works without Keycloak. Under the `sub` claim it comes from
+   Keycloak with the names.
 3. **Member list on first login.** When a user logs in for the first time, the
-   adapter sends `account.members` for every account they belong to, so names
-   arrive without waiting for the next change. See decision 4.
+   OpenFGA adapter sends `account.members` for every account they belong to,
+   so names arrive without waiting for the next change. See decision 4.
 4. **Continuous programs.** No new event. A program is an account under a fixed
    parent account, and subscribers tell programs apart by `accountPath`.
    Documented in the subscribing guide. See decision 2.
-5. **User created and deleted.** Types reserved in the contract draft, nothing
-   sent yet. See decision 1.
-6. **Docs and test.** Contract, subscribing guide and OpenAPI spec for the new
-   fields; e2e checks email and names in logins and the first-login list.
+5. **User created and deleted.** Sent by the Keycloak adapter from Keycloak
+   admin events, switched to the `User` CRD once it exists. See decision 1.
+6. **Contract.** All new fields are optional and filled where the IdP source
+   can. Any later source (another IdP, the `User` CRD) fills the same fields,
+   so subscribers don't change. The contract also says what created and
+   deleted mean and who deletes personal data, see decision 5.
+7. **Docs and test.** Contract, subscribing guide and OpenAPI spec for the new
+   fields; e2e checks email and names in logins, the first-login list and
+   user created.
 
 ## Decisions
 
@@ -65,11 +71,13 @@ Each with the options and what we propose.
    - c) Compare the users of every realm with a stored list on each poll. No
      gap after outages, but state per user and one poll interval late.
 
-   **Proposal: a)**, with b) ready if the first consumer can't wait. The types
+   **Proposal: b)**. Without these events the first consumer can't drop the
+   fork, and ADR 018 has no date. The install step that turns on `LOGIN` per
+   realm also turns on admin events. The types
    `io.platform-mesh.iam.user.created.v1alpha1` and
-   `io.platform-mesh.iam.user.deleted.v1alpha1` go into the contract draft now
-   with the fields the fork sends (`user.id`, email and names on created), so
-   any source fills the same events.
+   `io.platform-mesh.iam.user.deleted.v1alpha1` carry the fields the fork
+   sends (`user.id`, email and names on created), so the `User` CRD later
+   fills the same events and subscribers don't notice the switch.
 2. **Continuous programs.**
    - a) An account under a fixed parent, for example `continuous-programs`.
      Membership events already fire for it. No code.
@@ -90,25 +98,43 @@ Each with the options and what we propose.
 4. **Member list on first login.** Platform Mesh has no event when an invite
    is accepted, the OpenFGA tuple exists from the invite on.
    - a) On the first `LOGIN` of a user, list their accounts in OpenFGA and
-     send a snapshot per account. Needs the set of users already seen.
+     send a snapshot per account. The OpenFGA adapter reads the logins itself
+     with the Keycloak access it already has. It is the first login when the
+     event store has no earlier `LOGIN` of that user, so no list of users
+     already seen.
    - b) Leave it. Names arrive with the next change of the account.
 
-   **Proposal: a)**.
+   **Proposal: a)**. The fork sends the list on every login that accepts
+   pending invites. Here the OpenFGA tuple exists from the invite on, so the
+   first login is the matching trigger. Under the `sub` claim invited members
+   are stored under their email, so the first-login list doesn't find them by
+   the Keycloak id. That is documented as a known limit.
+5. **Meaning of user created and deleted, and personal data.**
+   - created: the user appeared in this org, through an invite or their first
+     login. A user in two orgs gets two `created` events.
+   - deleted: the user was removed from this org. It is not a request to purge
+     their data everywhere, since they may still be in other orgs. Nothing in
+     Platform Mesh deletes users today, so it will be rare.
+   - Email and names are only on logins, member lists and created, never on
+     `granted` or `revoked`. Subscribers that store them are responsible for
+     deleting them.
 
 ## Without Keycloak
 
-Logins, names, emails and option b) of decision 1 come from Keycloak and only
-exist with the bundled Keycloak. With another OIDC provider subscribers get
-membership events and snapshots without names. That is documented as a known
-limit.
+Logins, names, emails under the `sub` claim, the first-login list and user
+created and deleted come from Keycloak and only exist with the bundled
+Keycloak. All of it stays in the optional Keycloak parts of this module, with
+no Keycloak changes in Platform Mesh itself. With another OIDC provider
+subscribers get membership events and snapshots, with emails under the
+`email` claim but without names. That is documented as a known limit.
 
 ## Order
 
 1. Email and names in logins and member lists.
 2. Member list on first login.
-3. Continuous programs in the subscribing guide.
-4. Contract draft for user created and deleted.
+3. User created and deleted.
+4. Continuous programs in the subscribing guide.
 5. Docs and e2e alongside each step.
 
-Not in this milestone: sending user created and deleted (waits for ADR 018,
-or decision 1 b), account and resource events, notifications.
+Not in this milestone: the `User` CRD as a source (waits for ADR 018), account
+and resource events, notifications.
