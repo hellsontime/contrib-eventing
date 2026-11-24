@@ -72,6 +72,8 @@ path=$(last_snapshot "$account_id" | jq -r .accountPath)
 # hack/steps/40-demo-org.sh gave the demo user a name in Keycloak.
 names=$(last_snapshot "$account_id" | jq -r --arg u "$DEMO_USER" '.members[] | select(.user.id == $u) | "\(.user.firstName) \(.user.lastName)"')
 [[ $names == "Eventing Demo" ]] && pass "snapshot has the member's names" || fail "snapshot names: $names"
+email=$(last_snapshot "$account_id" | jq -r --arg u "$DEMO_USER" '.members[] | select(.user.id == $u) | .user.email')
+[[ $email == "$DEMO_USER" ]] && pass "snapshot has the member's email" || fail "snapshot email: $email"
 
 log "An invited user is announced the same way"
 invited=invited-$RANDOM@example.com
@@ -103,6 +105,9 @@ grep -q "subject: users/$DEMO_USER" <<<"$event" && pass "subject users/$DEMO_USE
 grep -q "pmorg: $ORG" <<<"$event" && pass "pmorg" || fail "login pmorg missing"
 grep -q "\"id\": \"$DEMO_USER\"" <<<"$event" && pass "user.id by the configured claim (email)" || fail "login user missing"
 grep -q "\"org\": \"$ORG\"" <<<"$event" && pass "org in the data" || fail "login org missing"
+grep -q "\"email\": \"$DEMO_USER\"" <<<"$event" && pass "email from Keycloak" || fail "login email missing"
+grep -q '"firstName": "Eventing"' <<<"$event" && grep -q '"lastName": "Demo"' <<<"$event" &&
+  pass "names from Keycloak" || fail "login names missing"
 grep -qi 'ipaddress\|sessionid' <<<"$event" && fail "login has an IP address or session id" || pass "no IP address or session id"
 total=$(logins)
 kind_kubectl -n "$NS" rollout restart deploy/eventing-keycloak-adapter >/dev/null

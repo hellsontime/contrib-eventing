@@ -58,7 +58,7 @@ Sent when a user gets or loses a role on an account.
 | `role` | yes | Platform Mesh role, for example `owner` or `member` |
 | `user.id` | yes | the user as Platform Mesh identifies them, see below |
 
-Users are identified the way the platform admin configured Platform Mesh: by the user claim security-operator uses (`--user-claim`, `email` by default). `user.id` is the value Platform Mesh authorizes the user with, so with the default it is the email. Invitations are always written with the email, so with the `sub` claim an invited user who never logged in appears with their email.
+Users are identified the way the platform admin configured Platform Mesh: by the user claim it authorizes with (`email` by default, or `sub`). `user.id` is the value Platform Mesh authorizes the user with, so with the default it is the email. Invitations are always written with the email, so with the `sub` claim an invited user who never logged in appears with their email.
 
 ## Members snapshot
 
@@ -86,8 +86,8 @@ keeps member lists can replace its copy instead of applying changes.
     "accountId": "a5zld11wopsu1uea/team-a",
     "accountPath": "root:orgs:acme:team-a",
     "members": [
-      { "user": { "id": "alice@example.com", "firstName": "Alice", "lastName": "Liddell" }, "roles": ["owner"] },
-      { "user": { "id": "bob@example.com" }, "roles": ["member"] }
+      { "user": { "id": "alice@example.com", "email": "alice@example.com", "firstName": "Alice", "lastName": "Liddell" }, "roles": ["owner"] },
+      { "user": { "id": "bob@example.com", "email": "bob@example.com" }, "roles": ["member"] }
     ]
   }
 }
@@ -113,10 +113,16 @@ to a single snapshot.
   snapshot or for none: if Keycloak can't be read in time, the snapshot has no
   names at all and says so in `errors` (below). A missing name therefore does
   not mean it was removed; keep the names you already have. Membership events
-  never carry names.
+  never carry names or emails.
+- **Email.** `user.email` is the user's email. With the `email` claim it is
+  `user.id` and always there, Keycloak access or not. With `sub` it comes from
+  Keycloak together with the names, by the same rules: missing without Keycloak
+  access, for users Keycloak doesn't know by that id, and for all members when
+  `errors` has `namesUnavailable`.
 - **Errors.** `errors` is only there when something went wrong while the
   snapshot was built. It lists codes. `namesUnavailable`: the names could not be
   read from Keycloak, so no member has one, though they may have one in Keycloak.
+  With the `sub` claim the emails are missing too.
   It is not set when eventing has no Keycloak access, since then no snapshot has
   names. The members list is complete either way. A later snapshot without
   `errors` has the names again.
@@ -144,7 +150,12 @@ Sent after a user logged in to an org's Keycloak realm.
   "datacontenttype": "application/json",
   "data": {
     "org": "acme",
-    "user": { "id": "alice@example.com" }
+    "user": {
+      "id": "alice@example.com",
+      "email": "alice@example.com",
+      "firstName": "Alice",
+      "lastName": "Liddell"
+    }
   }
 }
 ```
@@ -161,6 +172,13 @@ Attributes are as for membership events, with these differences:
 | --- | --- | --- |
 | `org` | yes | org name |
 | `user.id` | yes | the user as Platform Mesh identifies them, by the same rule as in membership events: the value of the user claim, the email by default and the Keycloak user id with `sub` |
+| `user.email` | no | the user's email, if they have one |
+| `user.firstName`, `user.lastName` | no | the user's names, if they have set them |
+
+- **Profile as of the login.** The adapter reads the user from Keycloak for
+  every login, so the email and names are current when the event is built, not
+  cached. If Keycloak can't be read, the login waits and goes out with the next
+  successful read. A user deleted before that read is sent with `user.id` only.
 
 - **No IP address, session or client.** Keycloak records them, the event leaves them out.
 - **Org realms only.** Logins to the `welcome` and `master` realms are not published, because they have no org.

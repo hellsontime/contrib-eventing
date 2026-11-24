@@ -29,6 +29,10 @@ const (
 	// StateConfigMap holds, per org, how far the adapter got in the changelog.
 	StateConfigMap = "eventing-openfga-adapter-state"
 	pageSize       = 50
+
+	// The user claims Platform Mesh can use as user id.
+	claimEmail = "email"
+	claimSub   = "sub"
 )
 
 // Adapter reads the changelog of every org's OpenFGA store. Platform Mesh
@@ -37,12 +41,15 @@ type Adapter struct {
 	FGA *Client
 	// Paths knows account paths. Without it events have no accountPath.
 	Paths *AccountPaths
-	// Names adds first and last names to the members of a snapshot. Without it
-	// snapshots have no names.
-	Names NameLookup
-	// NameTimeout is the one deadline for all name lookups of a snapshot. Zero
-	// means DefaultNameTimeout.
-	NameTimeout time.Duration
+	// UserClaim is the claim Platform Mesh uses as user id: email or sub.
+	UserClaim string
+	// Profiles adds names, and under the sub claim emails, to the members of a
+	// snapshot. Without it snapshots have neither, except the email under the
+	// email claim, which is the user id.
+	Profiles ProfileLookup
+	// ProfileTimeout is the one deadline for all profile lookups of a snapshot.
+	// Zero means DefaultProfileTimeout.
+	ProfileTimeout time.Duration
 	// SkipStores are stores that do not belong to an org.
 	SkipStores []string
 	Kube       ctrlruntimeclient.Client
@@ -211,7 +218,7 @@ func (a *Adapter) publishMembers(ctx context.Context, org, storeID string, m mem
 		return err
 	}
 	var problems []contract.SnapshotError
-	if !a.addNames(ctx, org, members) {
+	if !a.addProfiles(ctx, org, members) {
 		problems = append(problems, contract.ErrorNamesUnavailable)
 	}
 	e, err := contract.MembersSnapshot(contract.AccountMembers{
@@ -228,37 +235,46 @@ func (a *Adapter) publishMembers(ctx context.Context, org, storeID string, m mem
 	return a.publish(ctx, org, e)
 }
 
-// DefaultNameTimeout is how long a snapshot waits for all its names.
-const DefaultNameTimeout = 15 * time.Second
+// DefaultProfileTimeout is how long a snapshot waits for all its profiles.
+const DefaultProfileTimeout = 15 * time.Second
 
-// addNames fills in the names Keycloak knows, all or none: a snapshot with
-// names for some members only would make a consumer that replaces its copy
-// lose names it had. A Keycloak that cannot be reached must not hold
-// membership events back either, so within one deadline, and on any error the
-// snapshot goes out without names. It returns false if names could not be read,
-// which the snapshot reports in its errors. Without a lookup there is nothing
-// to report.
-func (a *Adapter) addNames(ctx context.Context, org string, members []contract.Member) bool {
-	if a.Names == nil {
+// addProfiles fills in names and emails. Under the email claim the email is
+// the user id, so every member has one, with or without Keycloak. Names, and
+// emails under the sub claim, come from Keycloak all or none: a snapshot with
+// them for some members only would make a consumer that replaces its copy lose
+// what it had. A Keycloak that cannot be reached must not hold membership
+// events back either, so within one deadline, and on any error the snapshot
+// goes out without them. It returns false if they could not be read, which the
+// snapshot reports in its errors. Without a lookup there is nothing to report.
+func (a *Adapter) addProfiles(ctx context.Context, org string, members []contract.Member) bool {
+	if a.UserClaim == claimEmail {
+		for i := range members {
+			members[i].User.Email = members[i].User.ID
+		}
+	}
+	if a.Profiles == nil {
 		return true
 	}
-	timeout := a.NameTimeout
+	timeout := a.ProfileTimeout
 	if timeout == 0 {
-		timeout = DefaultNameTimeout
+		timeout = DefaultProfileTimeout
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	names := make([][2]string, len(members))
+	profiles := make([]Profile, len(members))
 	for i := range members {
-		first, last, err := a.Names.Names(ctx, org, members[i].User.ID)
+		p, err := a.Profiles.Profile(ctx, org, members[i].User.ID)
 		if err != nil {
-			a.Log.Warn().Err(err).Str("org", org).Msg("cannot read names, publishing without")
+			a.Log.Warn().Err(err).Str("org", org).Msg("cannot read profiles, publishing without")
 			return false
 		}
-		names[i] = [2]string{first, last}
+		profiles[i] = p
 	}
-	for i := range members {
-		members[i].User.FirstName, members[i].User.LastName = names[i][0], names[i][1]
+	for i, p := range profiles {
+		members[i].User.FirstName, members[i].User.LastName = p.FirstName, p.LastName
+		if a.UserClaim == claimSub {
+			members[i].User.Email = p.Email
+		}
 	}
 	return true
 }

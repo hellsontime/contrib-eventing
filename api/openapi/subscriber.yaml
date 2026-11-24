@@ -238,6 +238,9 @@ components:
             org: acme
             user:
               id: alice@example.com
+              email: alice@example.com
+              firstName: Alice
+              lastName: Liddell
     AccountMembers:
       required: true
       content:
@@ -252,11 +255,13 @@ components:
             members:
               - user:
                   id: alice@example.com
+                  email: alice@example.com
                   firstName: Alice
                   lastName: Liddell
                 roles: [owner]
               - user:
                   id: bob@example.com
+                  email: bob@example.com
                 roles: [member]
   responses:
     Delivered:
@@ -318,7 +323,7 @@ components:
             Only there if something went wrong while the snapshot was built. The members list
             is complete anyway.
             `namesUnavailable`: the names could not be read from Keycloak, so no member has
-            one. Keep the names you already have.
+            one, and with the sub claim no email either. Keep the ones you already have.
           items:
             type: string
             enum: [namesUnavailable]
@@ -349,14 +354,20 @@ components:
         id:
           type: string
           description: |
-            The value Platform Mesh authorizes the user with: the claim the platform admin
-            configured (security-operator --user-claim), email by default. Invitations are
-            written with the email, also with the sub claim.
+            The value Platform Mesh authorizes the user with: the user claim the platform
+            admin configured, email by default, or sub. Invitations are written with the
+            email, also with the sub claim.
+        email:
+          type: string
+          description: |
+            Only in members snapshots and logins. In snapshots with the email claim it is
+            the id; with sub, like firstName. In logins, read from the identity provider at
+            the login.
         firstName:
           type: string
           description: |
-            Only in members snapshots, and only if Keycloak knows it and eventing can read
-            it. Up to five minutes old.
+            Only in members snapshots and logins, and only if Keycloak knows it and eventing
+            can read it. In snapshots up to five minutes old, in logins read at the login.
         lastName:
           type: string
           description: Like firstName.

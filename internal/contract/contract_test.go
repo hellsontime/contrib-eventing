@@ -101,8 +101,8 @@ func TestSnapshotErrors(t *testing.T) {
 	assert.NotEqual(t, ok.ID(), bad.ID(), "a snapshot with errors is another event")
 }
 
-func TestUserNames(t *testing.T) {
-	b, err := json.Marshal(Member{User: User{ID: "a", FirstName: "Ada", LastName: "Lovelace"}, Roles: []string{"member"}})
+func TestUserProfile(t *testing.T) {
+	b, err := json.Marshal(Member{User: User{ID: "a", Email: "ada@example.com", FirstName: "Ada", LastName: "Lovelace"}, Roles: []string{"member"}})
 	require.NoError(t, err)
-	assert.JSONEq(t, `{"user":{"id":"a","firstName":"Ada","lastName":"Lovelace"},"roles":["member"]}`, string(b))
+	assert.JSONEq(t, `{"user":{"id":"a","email":"ada@example.com","firstName":"Ada","lastName":"Lovelace"},"roles":["member"]}`, string(b))
 }

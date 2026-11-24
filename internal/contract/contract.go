@@ -32,8 +32,9 @@ const (
 // user claim the platform admin configured, email by default.
 type User struct {
 	ID string `json:"id"`
-	// FirstName and LastName are set where Keycloak knows them. Only the
-	// member snapshots carry them.
+	// Email, FirstName and LastName are set where the identity provider knows
+	// them. Logins and member snapshots carry them, membership events don't.
+	Email     string `json:"email,omitempty"`
 	FirstName string `json:"firstName,omitempty"`
 	LastName  string `json:"lastName,omitempty"`
 }

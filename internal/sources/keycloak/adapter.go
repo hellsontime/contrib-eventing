@@ -41,8 +41,7 @@ const (
 
 // Adapter reads the login events of every org realm.
 type Adapter struct {
-	KC    *keycloak.Client
-	Users *keycloak.Users
+	KC *keycloak.Client
 	// SkipRealms are realms that do not belong to an org.
 	SkipRealms []string
 	// UserClaim is the claim Platform Mesh uses as user id: email or sub.
@@ -185,15 +184,15 @@ func (a *Adapter) publishLogin(ctx context.Context, realm string, ev keycloak.Ev
 	if ev.UserID == "" {
 		return nil
 	}
-	user, err := a.userID(ctx, realm, ev)
+	user, err := a.user(ctx, realm, ev)
 	if err != nil {
 		return err
 	}
-	if user == "" {
+	if user.ID == "" {
 		a.Log.Warn().Str("org", realm).Str("eventId", ev.ID).Msg("login without a usable user id, dropped")
 		return nil
 	}
-	e, err := contract.LoggedIn(realm, contract.User{ID: user}, ev.ID, time.UnixMilli(ev.Time))
+	e, err := contract.LoggedIn(realm, user, ev.ID, time.UnixMilli(ev.Time))
 	if err != nil {
 		return err
 	}
@@ -204,22 +203,29 @@ func (a *Adapter) publishLogin(ctx context.Context, realm string, ev keycloak.Ev
 	return nil
 }
 
-// userID is the user id as the platform's user claim has it. With sub that is
-// the Keycloak id. With email it is the username, because security-operator
-// creates realms with registrationEmailAsUsername. If the user is gone by now,
-// the username Keycloak recorded with the login is used.
-func (a *Adapter) userID(ctx context.Context, realm string, ev keycloak.Event) (string, error) {
-	if a.UserClaim == ClaimSub {
-		return ev.UserID, nil
-	}
-	u, found, err := a.Users.ByID(ctx, realm, ev.UserID)
+// user reads the event's user from Keycloak, so the event has the profile as
+// it is now. If the read fails, the event waits for the next poll: nothing is
+// sent without the profile. A user that is gone by now gets no profile and the
+// username Keycloak recorded with the event.
+func (a *Adapter) user(ctx context.Context, realm string, ev keycloak.Event) (contract.User, error) {
+	u, found, err := a.KC.User(ctx, realm, ev.UserID)
 	if err != nil {
-		return "", fmt.Errorf("reading user %s of %s: %w", ev.UserID, realm, err)
+		return contract.User{}, fmt.Errorf("reading user %s of %s: %w", ev.UserID, realm, err)
 	}
-	if found && u.Username != "" {
-		return u.Username, nil
+	if !found {
+		return contract.User{ID: a.claimID(ev.UserID, ev.Details["username"])}, nil
 	}
-	return strings.ToLower(ev.Details["username"]), nil
+	return contract.User{ID: a.claimID(u.ID, u.Username), Email: u.Email, FirstName: u.FirstName, LastName: u.LastName}, nil
+}
+
+// claimID is the user id as the platform's user claim has it. With sub that is
+// the Keycloak id. With email it is the username, because Platform Mesh
+// creates realms with registrationEmailAsUsername.
+func (a *Adapter) claimID(keycloakID, username string) string {
+	if a.UserClaim == ClaimSub {
+		return keycloakID
+	}
+	return strings.ToLower(username)
 }
 
 func (a *Adapter) loadState(ctx context.Context) (*corev1.ConfigMap, map[string]realmState, error) {

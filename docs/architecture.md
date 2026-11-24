@@ -60,7 +60,7 @@ Knative be reached only from the part before it (see
 
 | Part | What it does | Who builds it |
 | --- | --- | --- |
-| OpenFGA adapter | Reads the OpenFGA changelog and turns membership changes into events, plus a snapshot of the members of each changed account. If it can reach Keycloak (`view-users`), the snapshot has first and last names | us |
+| OpenFGA adapter | Reads the OpenFGA changelog and turns membership changes into events, plus a snapshot of the members of each changed account. If it can reach Keycloak (`view-users`), the snapshot has emails and first and last names; with the `email` claim the emails are always there | us |
 | Keycloak adapter | Reads the login events stored by each org realm and turns them into `user.loggedin` events. Its Keycloak client only has `view-events` and `view-users` | us |
 | Ingress | Checks who is sending, then hands the event to the broker. Reachable through the platform's Gateway | us |
 | Subscription API | A kcp resource for platform admins in the eventing workspace: event types, optional orgs, target URL, retry settings | us |
@@ -113,7 +113,7 @@ The Keycloak adapter works the same way, with Keycloak's event store instead of 
 
 1. Keycloak stores a `LOGIN` event in the realm `acme`. The install switches the store on for logins only, and the events are kept for seven days.
 2. The Keycloak adapter polls the stored events of every org realm (not `master` or `welcome`). Each realm has a cursor, the time of the last event it published, kept in a ConfigMap. Keycloak includes events at exactly that time, so the cursor also keeps the ids of the events at that time it has already sent.
-3. For each new event it looks up the user to get the id the platform's user claim has (the email by default, the Keycloak id with `sub`), builds a `user.loggedin` event ([contract](contract.md)) and posts it to the ingress. The cursor only moves after every event of a page was accepted.
+3. For each new event it reads the user from Keycloak, uncached, for the id the platform's user claim has (the email by default, the Keycloak id with `sub`) and the email and names. It builds a `user.loggedin` event ([contract](contract.md)) and posts it to the ingress. If the read fails, the page waits for the next poll. The cursor only moves after every event of a page was accepted.
 4. From the ingress on, the event travels like any other.
 
 ## Tenancy
