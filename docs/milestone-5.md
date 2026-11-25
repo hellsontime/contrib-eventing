@@ -43,8 +43,9 @@ the [roadmap](roadmap.md).
 4. **Continuous programs.** No new event. A program is an account under a fixed
    parent account, and subscribers tell programs apart by `accountPath`.
    Documented in the subscribing guide. See decision 2.
-5. **User created and deleted.** Sent by the Keycloak adapter from Keycloak
-   admin events, switched to the `User` CRD once it exists. See decision 1.
+5. **User created and deleted.** Sent by the OpenFGA adapter when a user gets
+   their first role in an org or loses their last one, switched to the `User`
+   CRD once it exists. See decision 1.
 6. **Contract.** All new fields are optional and filled where the IdP source
    can. Any later source (another IdP, the `User` CRD) fills the same fields,
    so subscribers don't change. The contract also says what created and
@@ -70,10 +71,17 @@ Each with the options and what we propose.
      every admin operation in the realm. Same retention gap as logins.
    - c) Compare the users of every realm with a stored list on each poll. No
      gap after outages, but state per user and one poll interval late.
+   - d) Derive them from membership in OpenFGA: the first role of a user in
+     an org is created, removing their last role is deleted. No Keycloak
+     settings, works with any IdP.
 
-   **Proposal: b)**. Without these events the first consumer can't drop the
-   fork, and ADR 018 has no date. The install step that turns on `LOGIN` per
-   realm also turns on admin events. The types
+   **Proposal: d)**, as a stopgap until the `User` CRD exists. Without these
+   events the first consumer can't drop the fork, and ADR 018 has no date.
+   OpenFGA stores permissions, not users, so this is not the right source in
+   the long run. But the fork means the same thing by created ("first seen in
+   this org", see decision 5), and every source we have today is a stand-in:
+   b) and c) only work with Keycloak, and b) also needs new realm settings
+   and stores more personal data in Keycloak. The types
    `io.platform-mesh.iam.user.created.v1alpha1` and
    `io.platform-mesh.iam.user.deleted.v1alpha1` carry the fields the fork
    sends (`user.id`, email and names on created), so the `User` CRD later
@@ -110,23 +118,22 @@ Each with the options and what we propose.
    are stored under their email, so the first-login list doesn't find them by
    the Keycloak id. That is documented as a known limit.
 5. **Meaning of user created and deleted, and personal data.**
-   - created: the user appeared in this org, through an invite or their first
-     login. A user in two orgs gets two `created` events.
-   - deleted: the user was removed from this org. It is not a request to purge
-     their data everywhere, since they may still be in other orgs. Nothing in
-     Platform Mesh deletes users today, so it will be rare.
+   - created: the user got their first role in this org, usually through an
+     invite. A user in two orgs gets two `created` events.
+   - deleted: the user lost their last role in this org. It is not a request
+     to purge their data everywhere, since they may still be in other orgs.
    - Email and names are only on logins, member lists and created, never on
      `granted` or `revoked`. Subscribers that store them are responsible for
      deleting them.
 
 ## Without Keycloak
 
-Logins, names, emails under the `sub` claim, the first-login list and user
-created and deleted come from Keycloak and only exist with the bundled
-Keycloak. All of it stays in the optional Keycloak parts of this module, with
-no Keycloak changes in Platform Mesh itself. With another OIDC provider
-subscribers get membership events and snapshots, with emails under the
-`email` claim but without names. That is documented as a known limit.
+Logins, names, emails under the `sub` claim and the first-login list come
+from Keycloak and only exist with the bundled Keycloak. All of it stays in the
+optional Keycloak parts of this module, with no Keycloak changes in Platform
+Mesh itself. With another OIDC provider subscribers get membership events,
+snapshots and user created and deleted, with emails under the `email` claim
+but without names. That is documented as a known limit.
 
 ## Order
 
