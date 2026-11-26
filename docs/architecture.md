@@ -42,7 +42,7 @@ flowchart LR
   fga -- changelog and members --> adapter
   info -. "watched through core.platform-mesh.io" .-> adapter
   kc -- "login events, names" --> kcadapter
-  kc -. "names, optional" .-> adapter
+  kc -. "names and logins, optional" .-> adapter
   kcadapter -- events --> ing
   adapter -- events --> ing
   ing -- checked sender --> bi
@@ -60,7 +60,7 @@ Knative be reached only from the part before it (see
 
 | Part | What it does | Who builds it |
 | --- | --- | --- |
-| OpenFGA adapter | Reads the OpenFGA changelog and turns membership changes into events, plus a snapshot of the members of each changed account. If it can reach Keycloak (`view-users`), the snapshot has emails and first and last names; with the `email` claim the emails are always there | us |
+| OpenFGA adapter | Reads the OpenFGA changelog and turns membership changes into events, plus a snapshot of the members of each changed account. With Keycloak access it also sends the snapshots of a user's accounts after their first login. If it can reach Keycloak (`view-users`), the snapshot has emails and first and last names; with the `email` claim the emails are always there | us |
 | Keycloak adapter | Reads the login events stored by each org realm and turns them into `user.loggedin` events. Its Keycloak client only has `view-events` and `view-users` | us |
 | Ingress | Checks who is sending, then hands the event to the broker. Reachable through the platform's Gateway | us |
 | Subscription API | A kcp resource for platform admins in the eventing workspace: event types, optional orgs, target URL, retry settings | us |
@@ -115,6 +115,16 @@ The Keycloak adapter works the same way, with Keycloak's event store instead of 
 2. The Keycloak adapter polls the stored events of every org realm (not `master` or `welcome`). Each realm has a cursor, the time of the last event it published, kept in a ConfigMap. Keycloak includes events at exactly that time, so the cursor also keeps the ids of the events at that time it has already sent.
 3. For each new event it reads the user from Keycloak, uncached, for the id the platform's user claim has (the email by default, the Keycloak id with `sub`) and the email and names. It builds a `user.loggedin` event ([contract](contract.md)) and posts it to the ingress. If the read fails, the page waits for the next poll. The cursor only moves after every event of a page was accepted.
 4. From the ingress on, the event travels like any other.
+
+The OpenFGA adapter reads the same logins with its own cursor, kept with its
+changelog token. For each login it asks Keycloak whether the user has an
+earlier stored login. If not, it reads the user's roles from OpenFGA and sends
+a members snapshot of each of their accounts. Someone invited by email is in
+OpenFGA from the invite on, but has names only after they logged in, which
+OpenFGA doesn't see. Each poll reads the changelogs of all orgs first and the
+logins after, all orgs together within 30 seconds, so a slow or unreachable
+Keycloak only delays the logins. Logins it doesn't get to wait for the next
+poll.
 
 ## Tenancy
 

@@ -33,7 +33,8 @@ More detail: [architecture](docs/architecture.md), [event contract](docs/contrac
 - Membership events (a user gets or loses a role on an account) and a snapshot
   of an account's members after each change, read from OpenFGA. Events carry the
   account's workspace path. The snapshot has the members' emails and first and
-  last names where Keycloak knows them.
+  last names where Keycloak knows them. A user's first login sends the
+  snapshots of their accounts, too.
 - A login event after every login to an org's Keycloak realm, with the user's
   email and names.
 - Subscriptions for platform admins, covering all orgs or some of them, with

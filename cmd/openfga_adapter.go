@@ -74,7 +74,10 @@ func runOpenFGAAdapter(_ *cobra.Command, _ []string) { // coverage-ignore
 			return pub.Publish(ctx, cfg.IngressURL, e)
 		},
 	}
-	a.Profiles = keycloakProfiles(ctx, cfg.KeycloakConfig)
+	if kc := keycloakClient(ctx, cfg.KeycloakConfig); kc != nil {
+		a.Profiles = &openfga.KeycloakProfiles{Users: &keycloak.Users{Client: kc, TTL: cfg.NameTTL}, UserClaim: cfg.UserClaim}
+		a.Logins = &openfga.KeycloakLogins{KC: kc, UserClaim: cfg.UserClaim}
+	}
 	if cfg.CoreKubeconfig != "" {
 		coreCfg, err := clientcmd.BuildConfigFromFlags("", cfg.CoreKubeconfig)
 		if err != nil {
@@ -85,21 +88,20 @@ func runOpenFGAAdapter(_ *cobra.Command, _ []string) { // coverage-ignore
 			log.Fatal().Err(err).Msg("unable to watch account paths")
 		}
 	}
-	log.Info().Str("openfga", cfg.OpenFGAURL).Bool("accountPaths", a.Paths != nil).Str("userClaim", a.UserClaim).Bool("profiles", a.Profiles != nil).Msg("starting adapter")
+	log.Info().Str("openfga", cfg.OpenFGAURL).Bool("accountPaths", a.Paths != nil).Str("userClaim", a.UserClaim).Bool("keycloak", a.Profiles != nil).Msg("starting adapter")
 	if err := a.Run(ctx); err != nil {
 		log.Fatal().Err(err).Msg("adapter stopped")
 	}
 }
 
-// keycloakProfiles reads profiles from Keycloak if the reader's secret is
-// there. If not, snapshots have no names, which is what an install without
-// Keycloak access gets.
-func keycloakProfiles(ctx context.Context, cfg config.KeycloakConfig) openfga.ProfileLookup { // coverage-ignore
+// keycloakClient connects to Keycloak if the reader's secret is there. If not,
+// snapshots have no names and none follow logins, which is what an install
+// without Keycloak access gets.
+func keycloakClient(ctx context.Context, cfg config.KeycloakConfig) *keycloak.Client { // coverage-ignore
 	clientID, secret, err := keycloak.ReadCredentials(cfg.ClientIDFile, cfg.ClientSecretFile)
 	if err != nil {
 		log.Info().Err(err).Msg("no Keycloak access, member snapshots have no names")
 		return nil
 	}
-	kc := keycloak.NewClient(ctx, cfg.URL, clientID, secret)
-	return &openfga.KeycloakProfiles{Users: &keycloak.Users{Client: kc, TTL: cfg.NameTTL}, UserClaim: cfg.UserClaim}
+	return keycloak.NewClient(ctx, cfg.URL, clientID, secret)
 }

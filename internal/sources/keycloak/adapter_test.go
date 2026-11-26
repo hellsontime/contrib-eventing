@@ -190,7 +190,7 @@ func TestFirstRunStartsNow(t *testing.T) {
 	assert.Equal(t, []int64{1000}, h.fake.dateFroms["acme"])
 	assert.NotContains(t, h.fake.dateFroms, "master", "master is skipped")
 	assert.NotContains(t, h.fake.dateFroms, "welcome", "welcome is skipped")
-	assert.Equal(t, realmState{RealmID: "id-acme", Since: 1000}, loadedState(t, a)["acme"])
+	assert.Equal(t, realmState{RealmID: "id-acme", Cursor: kc.Cursor{Since: 1000}}, loadedState(t, a)["acme"])
 
 	// A login after the start is published, with the org, the user and the login time.
 	h.fake.login("acme", "new", 1500, "u-alice")
@@ -229,12 +229,12 @@ func TestInclusiveBoundary(t *testing.T) {
 
 	require.Len(t, h.published, 2, "each once, although Keycloak returns e1 again")
 	assert.NotEqual(t, h.published[0].ID(), h.published[1].ID())
-	assert.Equal(t, realmState{RealmID: "id-acme", Since: 2000, Seen: []string{"e1", "e2"}}, loadedState(t, a)["acme"])
+	assert.Equal(t, realmState{RealmID: "id-acme", Cursor: kc.Cursor{Since: 2000, Seen: []string{"e1", "e2"}}}, loadedState(t, a)["acme"])
 
 	h.fake.login("acme", "e3", 2001, "u-alice")
 	require.NoError(t, a.poll(ctx))
 	require.Len(t, h.published, 3)
-	assert.Equal(t, realmState{RealmID: "id-acme", Since: 2001, Seen: []string{"e3"}}, loadedState(t, a)["acme"], "seen starts again when time moves on")
+	assert.Equal(t, realmState{RealmID: "id-acme", Cursor: kc.Cursor{Since: 2001, Seen: []string{"e3"}}}, loadedState(t, a)["acme"], "seen starts again when time moves on")
 }
 
 func TestManyPages(t *testing.T) {
@@ -272,7 +272,7 @@ func TestFailedPageDoesNotMoveCursor(t *testing.T) {
 	h.failAfter = 1
 	require.NoError(t, a.poll(ctx), "a publish error is logged and retried, not a failed poll")
 	require.Len(t, h.published, 1)
-	assert.Equal(t, realmState{RealmID: "id-acme", Since: 1000}, loadedState(t, a)["acme"], "the cursor stays")
+	assert.Equal(t, realmState{RealmID: "id-acme", Cursor: kc.Cursor{Since: 1000}}, loadedState(t, a)["acme"], "the cursor stays")
 	firstTry := h.published[0].ID()
 
 	h.failAfter, h.published = -1, nil
@@ -361,7 +361,7 @@ func TestUserReadFails(t *testing.T) {
 	h.fake.mu.Unlock()
 	require.NoError(t, a.poll(ctx), "logged per realm, not a failed poll")
 	assert.Empty(t, h.published)
-	assert.Equal(t, realmState{RealmID: "id-acme", Since: 1000}, loadedState(t, a)["acme"], "the cursor stays")
+	assert.Equal(t, realmState{RealmID: "id-acme", Cursor: kc.Cursor{Since: 1000}}, loadedState(t, a)["acme"], "the cursor stays")
 
 	h.fake.mu.Lock()
 	h.fake.usersDown = false
@@ -413,7 +413,7 @@ func TestKeycloakOutage(t *testing.T) {
 	h.fake.mu.Unlock()
 	require.Error(t, a.poll(ctx), "an unreachable Keycloak fails the poll")
 	assert.Empty(t, h.published)
-	assert.Equal(t, realmState{RealmID: "id-acme", Since: 1000}, loadedState(t, a)["acme"], "state is untouched")
+	assert.Equal(t, realmState{RealmID: "id-acme", Cursor: kc.Cursor{Since: 1000}}, loadedState(t, a)["acme"], "state is untouched")
 
 	h.fake.mu.Lock()
 	h.fake.down = false

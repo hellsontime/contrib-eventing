@@ -115,6 +115,34 @@ kind_kubectl -n "$NS" rollout status deploy/eventing-keycloak-adapter --timeout=
 sleep 15
 [[ $(logins) == "$total" ]] && pass "no duplicates after a restart" || fail "logins published again"
 
+log "An invited user's first login sends their account's members"
+invited=invited-$RANDOM@example.com
+# member_names <user>: the user's names in the org account's last snapshot.
+member_names() { last_snapshot "$account_id" | jq -r --arg u "$1" '.members[] | select(.user.id == $u) | "\(.user.firstName) \(.user.lastName)"'; }
+listed() { [[ -n $(member_names "$1") ]]; }
+add_member "$invited" member
+wait_for "a snapshot with the invited user" 30 listed "$invited"
+[[ $(member_names "$invited") == "null null" ]] && pass "no names before the first login" || fail "names: $(member_names "$invited")"
+# Accepting an invite leaves the user in Keycloak with names and a password.
+password=$(head -c 18 /dev/urandom | base64 | tr -d '/+=')
+keycloak POST "/admin/realms/$ORG/users" -d "$(jq -nc --arg u "$invited" --arg p "$password" '{username: $u, email: $u,
+  enabled: true, emailVerified: true, firstName: "Invited", lastName: "User", credentials: [{type: "password", value: $p, temporary: false}]}')" >/dev/null
+"$ROOT/hack/login.sh" "$invited" "$password" >/dev/null
+has_names() { [[ $(member_names "$1") == "Invited User" ]]; }
+wait_for "a snapshot with the invited user's names" 60 has_names "$invited"
+pass "snapshot after the first login has the names"
+after=$(snapshots)
+"$ROOT/hack/login.sh" "$invited" "$password" >/dev/null
+sleep 15
+[[ $(snapshots) == "$after" ]] && pass "a second login sends no snapshot" || fail "snapshots after the second login"
+invited_id=$(keycloak GET "/admin/realms/$ORG/users?exact=true&username=$invited" | jq -r '.[0].id')
+keycloak DELETE "/admin/realms/$ORG/users/$invited_id" >/dev/null
+before=$(count revoked)
+add_member --remove "$invited" member
+wait_for "membership.revoked for the invited user" 30 more_than revoked "$before"
+# shellcheck disable=SC2016 # expands in eval
+wait_for "a snapshot without the invited user" 30 eval '! listed "$invited"'
+
 log "The reader token has no admin"
 reader_secret=$(kind_kubectl -n "$NS" get secret contrib-eventing-keycloak-reader -o jsonpath='{.data.client_secret}' | base64 -d)
 reader_token=$(printf %s "$reader_secret" | curl -sS --fail-with-body --cacert "$SECRET_DIR/domain-ca.crt" \

@@ -18,6 +18,7 @@ import (
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 
 	"github.com/platform-mesh/contrib-eventing/internal/contract"
+	"github.com/platform-mesh/contrib-eventing/internal/keycloak"
 	"go.platform-mesh.io/golang-commons/logger"
 
 	corev1 "k8s.io/api/core/v1"
@@ -50,6 +51,12 @@ type Adapter struct {
 	// ProfileTimeout is the one deadline for all profile lookups of a snapshot.
 	// Zero means DefaultProfileTimeout.
 	ProfileTimeout time.Duration
+	// Logins finds users' first logins, after which the adapter sends the
+	// members of each account the user has a role on. Without it, it doesn't.
+	Logins *KeycloakLogins
+	// LoginsTimeout is the one deadline for reading the logins of all orgs in
+	// a poll. Zero means defaultLoginsTimeout.
+	LoginsTimeout time.Duration
 	// SkipStores are stores that do not belong to an org.
 	SkipStores []string
 	Kube       ctrlruntimeclient.Client
@@ -69,6 +76,9 @@ type orgState struct {
 	// Since is where reading starts while there is no token yet. Zero means the
 	// beginning of the store.
 	Since time.Time `json:"since,omitzero"`
+	// Logins is how far the adapter got in the org's logins. Nil until it reads
+	// them.
+	Logins *keycloak.Cursor `json:"logins,omitempty"`
 }
 
 func (a *Adapter) Run(ctx context.Context) error {
@@ -103,6 +113,9 @@ func (a *Adapter) poll(ctx context.Context) error {
 	// The first run always saves, even without orgs, so the next run knows it
 	// is not the first.
 	changed := firstRun
+	// The membership changes of every org go out first, so a slow Keycloak
+	// only delays the logins.
+	var orgs []string
 	for org, storeID := range stores {
 		if slices.Contains(a.SkipStores, org) {
 			continue
@@ -119,10 +132,23 @@ func (a *Adapter) poll(ctx context.Context) error {
 		if err != nil {
 			a.Log.Error().Err(err).Str("org", org).Msg("cannot publish membership changes")
 		}
+		if a.Logins != nil && st.Logins == nil {
+			// Like the changelog: orgs that are new to the adapter start at
+			// their first login, others now.
+			st.Logins = &keycloak.Cursor{}
+			if !fresh || firstRun {
+				st.Logins.Since = time.Now().UnixMilli()
+			}
+			moved = true
+		}
 		if moved || fresh {
 			state[org] = st
 			changed = true
 		}
+		orgs = append(orgs, org)
+	}
+	if a.Logins != nil && a.publishAllFirstLogins(ctx, orgs, state) {
+		changed = true
 	}
 	// Forget orgs whose store is gone.
 	for org := range state {
@@ -135,6 +161,39 @@ func (a *Adapter) poll(ctx context.Context) error {
 		return a.saveState(ctx, cm, state)
 	}
 	return nil
+}
+
+// defaultLoginsTimeout is how long one poll reads logins, for all orgs.
+const defaultLoginsTimeout = 30 * time.Second
+
+// publishAllFirstLogins sends the members after first logins, org by org,
+// within one deadline. Orgs it doesn't get to wait for the next poll. It
+// returns whether a cursor moved.
+func (a *Adapter) publishAllFirstLogins(ctx context.Context, orgs []string, state map[string]orgState) bool {
+	timeout := a.LoginsTimeout
+	if timeout == 0 {
+		timeout = defaultLoginsTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	changed := false
+	for _, org := range orgs {
+		if ctx.Err() != nil {
+			a.Log.Warn().Msg("logins took too long, the rest wait for the next poll")
+			break
+		}
+		st := state[org]
+		moved, err := a.publishFirstLogins(ctx, org, &st)
+		// An org without a realm has no logins.
+		if err != nil && !keycloak.IsNotFound(err) {
+			a.Log.Warn().Err(err).Str("org", org).Msg("cannot publish members after first logins")
+		}
+		if moved {
+			state[org] = st
+			changed = true
+		}
+	}
+	return changed
 }
 
 // publishNew publishes the org's new membership changes page by page. After
@@ -168,7 +227,8 @@ func (a *Adapter) publishNew(ctx context.Context, org string, st *orgState) (boo
 			last[id] = c
 		}
 		for _, m := range accounts {
-			if err := a.publishMembers(ctx, org, st.StoreID, m, last[contract.AccountID(m.cluster, m.account)]); err != nil {
+			c := last[contract.AccountID(m.cluster, m.account)]
+			if err := a.publishMembers(ctx, org, st.StoreID, m, changeKey(c), c.Timestamp); err != nil {
 				return moved, err
 			}
 		}
@@ -206,10 +266,35 @@ func (a *Adapter) publishChange(ctx context.Context, org string, m membership, c
 	return a.publish(ctx, org, e)
 }
 
-// publishMembers sends the account's members as they are now, after its last
-// change. A deleted account has none left.
-func (a *Adapter) publishMembers(ctx context.Context, org, storeID string, m membership, last Change) error {
-	path, err := a.accountPath(m, last.Timestamp)
+// publishFirstLogins sends, after a user's first login, the members of every
+// account the user has a role on. An invited user is in OpenFGA from the
+// invite on, but has names only once they log in, which OpenFGA doesn't see.
+func (a *Adapter) publishFirstLogins(ctx context.Context, org string, st *orgState) (bool, error) {
+	return a.Logins.EachNew(ctx, org, st.Logins, func(l FirstLogin) error {
+		tuples, err := a.FGA.ReadUser(ctx, st.StoreID, "user:"+l.UserID, "role")
+		if err != nil {
+			return err
+		}
+		seen := map[string]bool{}
+		for _, t := range tuples {
+			m, ok := parseMembership(t)
+			id := contract.AccountID(m.cluster, m.account)
+			if !ok || m.user != l.UserID || seen[id] {
+				continue
+			}
+			seen[id] = true
+			if err := a.publishMembers(ctx, org, st.StoreID, m, "keycloak/"+l.ID, l.At); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// publishMembers sends the account's members as they are now, after the change
+// or login named by key at the given time. A deleted account has none left.
+func (a *Adapter) publishMembers(ctx context.Context, org, storeID string, m membership, key string, at time.Time) error {
+	path, err := a.accountPath(m, at)
 	if err != nil {
 		return err
 	}
@@ -228,7 +313,7 @@ func (a *Adapter) publishMembers(ctx context.Context, org, storeID string, m mem
 		AccountPath: path,
 		Members:     members,
 		Errors:      problems,
-	}, changeKey(last), time.Now())
+	}, key, time.Now())
 	if err != nil {
 		return err
 	}

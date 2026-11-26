@@ -13,7 +13,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
-	"strings"
 	"time"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
@@ -30,7 +29,6 @@ import (
 const (
 	// StateConfigMap holds, per realm, how far the adapter got in the events.
 	StateConfigMap = "eventing-keycloak-adapter-state"
-	pageSize       = 50
 
 	// ClaimEmail and ClaimSub are the user claims the adapter can follow.
 	ClaimEmail = "email"
@@ -60,12 +58,7 @@ type Adapter struct {
 type realmState struct {
 	// RealmID is the realm's Keycloak id. A recreated org gets a new one.
 	RealmID string `json:"realmID,omitempty"`
-	// Since is the time of the last event read, in epoch milliseconds. Keycloak
-	// includes events at exactly that time in the next read. Zero is the
-	// beginning of the realm's events.
-	Since int64 `json:"since,omitempty"`
-	// Seen are the ids of the events at Since that were published already.
-	Seen []string `json:"seen,omitempty"`
+	keycloak.Cursor
 }
 
 func (a *Adapter) Run(ctx context.Context) error {
@@ -143,39 +136,12 @@ func (a *Adapter) poll(ctx context.Context) error {
 	return nil
 }
 
-// publishNew publishes the realm's new logins page by page. The cursor only
-// moves after every event of a page was accepted; if one fails, the whole page
-// is read again next time. Consumers drop the repeats by event id.
+// publishNew publishes the realm's new logins. Consumers drop repeats of a page
+// read again by event id.
 func (a *Adapter) publishNew(ctx context.Context, realm string, st *realmState) (bool, error) {
-	moved := false
-	for {
-		want := pageSize + len(st.Seen)
-		events, err := a.KC.Events(ctx, realm, loginType, st.Since, want)
-		if err != nil {
-			return moved, err
-		}
-		cur := *st
-		cur.Seen = slices.Clone(st.Seen)
-		for _, ev := range events {
-			if ev.Time < cur.Since || (ev.Time == cur.Since && slices.Contains(cur.Seen, ev.ID)) {
-				continue
-			}
-			if err := a.publishLogin(ctx, realm, ev); err != nil {
-				return moved, err
-			}
-			if ev.Time > cur.Since {
-				cur.Since, cur.Seen = ev.Time, nil
-			}
-			cur.Seen = append(cur.Seen, ev.ID)
-		}
-		if cur.Since != st.Since || len(cur.Seen) != len(st.Seen) {
-			*st = cur
-			moved = true
-		}
-		if len(events) < want {
-			return moved, nil
-		}
-	}
+	return a.KC.EachNew(ctx, realm, loginType, &st.Cursor, func(ev keycloak.Event) error {
+		return a.publishLogin(ctx, realm, ev)
+	})
 }
 
 // publishLogin sends one login. Logins without a user, which Keycloak records
@@ -213,19 +179,9 @@ func (a *Adapter) user(ctx context.Context, realm string, ev keycloak.Event) (co
 		return contract.User{}, fmt.Errorf("reading user %s of %s: %w", ev.UserID, realm, err)
 	}
 	if !found {
-		return contract.User{ID: a.claimID(ev.UserID, ev.Details["username"])}, nil
+		return contract.User{ID: keycloak.UserID(a.UserClaim, ev.UserID, ev.Details["username"])}, nil
 	}
-	return contract.User{ID: a.claimID(u.ID, u.Username), Email: u.Email, FirstName: u.FirstName, LastName: u.LastName}, nil
-}
-
-// claimID is the user id as the platform's user claim has it. With sub that is
-// the Keycloak id. With email it is the username, because Platform Mesh
-// creates realms with registrationEmailAsUsername.
-func (a *Adapter) claimID(keycloakID, username string) string {
-	if a.UserClaim == ClaimSub {
-		return keycloakID
-	}
-	return strings.ToLower(username)
+	return contract.User{ID: keycloak.UserID(a.UserClaim, u.ID, u.Username), Email: u.Email, FirstName: u.FirstName, LastName: u.LastName}, nil
 }
 
 func (a *Adapter) loadState(ctx context.Context) (*corev1.ConfigMap, map[string]realmState, error) {

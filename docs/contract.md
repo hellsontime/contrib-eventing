@@ -62,9 +62,10 @@ Users are identified the way the platform admin configured Platform Mesh: by the
 
 ## Members snapshot
 
-Sent after the members of an account changed. It carries the full list as it
-is in the authorization engine when the event is built, so a subscriber that
-keeps member lists can replace its copy instead of applying changes.
+Sent after the members of an account changed, and after a member's first
+login. It carries the full list as it is in the authorization engine when the
+event is built, so a subscriber that keeps member lists can replace its copy
+instead of applying changes.
 
 | Type | Meaning |
 | --- | --- |
@@ -126,9 +127,16 @@ to a single snapshot.
   It is not set when eventing has no Keycloak access, since then no snapshot has
   names. The members list is complete either way. A later snapshot without
   `errors` has the names again.
-- **Only on change.** A snapshot is sent when the account's members change. A
-  new Subscription, or one that missed a snapshot, gets an account's list with
-  that account's next change.
+- **On change and after first logins.** A snapshot is sent when the account's
+  members change. It is also sent for every account a user has a role on after
+  their first login to the org, so an invited user's names arrive once they
+  have logged in and set them. Keycloak keeps logins for seven days by default,
+  so the first login after a longer pause counts as first, too, as does every
+  user's first login after eventing was installed. These need Keycloak access.
+  With the `sub` claim a first login finds only the roles written under the
+  user's Keycloak id, not those still under the email they were invited
+  with. A new Subscription, or one that missed a snapshot, gets an
+  account's list with that account's next change or first login.
 
 ## Login events
 

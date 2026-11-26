@@ -90,7 +90,9 @@ webhooks:
   accountMembers:
     post:
       operationId: accountMembers
-      summary: The members of an account changed; this is the full list now.
+      summary: |
+        The members of an account changed, or one of them logged in for the first time;
+        this is the full list now.
       parameters:
         - $ref: '#/components/parameters/ceSpecversion'
         - $ref: '#/components/parameters/ceId'
