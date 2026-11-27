@@ -112,6 +112,7 @@ jobs:
         run: |
           mkdir -p state
           kubectl get pods -A -o wide >state/pods.txt 2>&1 || true
+          kubectl describe nodes >state/nodes.txt 2>&1 || true
           kubectl get events -A --sort-by=.lastTimestamp >state/events.txt 2>&1 || true
           kubectl -n platform-mesh-system get platformmesh,managedprovider,helmrelease,ocirepository -o yaml >state/platform-mesh.yaml 2>&1 || true
           kubectl -n platform-mesh-system get repositories.delivery.ocm.software,components.delivery.ocm.software,resources.delivery.ocm.software -o yaml >state/ocm.yaml 2>&1 || true
